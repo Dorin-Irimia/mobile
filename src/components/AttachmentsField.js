@@ -131,7 +131,9 @@ export default function AttachmentsField({
 
   const renderExistingItem = (att) => {
     const isImage = att.kind === 'image' || (att.mimeType || '').startsWith('image/');
-    const fullUrl = att.fileUrl.startsWith('http') ? att.fileUrl : `${apiUrl}${att.fileUrl}`;
+    const fullUrl = att.fileUrl.startsWith('http') || att.fileUrl.startsWith('file:')
+      ? att.fileUrl
+      : `${apiUrl}${att.fileUrl}`;
     return (
       <TouchableOpacity
         key={att.id}

@@ -35,6 +35,11 @@ import {
 } from '../theme';
 import { getApiUrl } from '../api/client';
 import packageJson from '../../package.json';
+import {
+  QUICK_ACTIONS,
+  MAX_HOME_QUICK_ACTIONS,
+  normalizeQuickActionIds,
+} from '../utils/quickActions';
 
 const APP_VERSION = packageJson.version || '1.0.0';
 
@@ -145,6 +150,47 @@ function ToggleRow({ icon, label, sub, value, onValueChange, disabled }) {
   );
 }
 
+function QuickActionOption({ action, selected, order, onToggle, onMoveUp, onMoveDown, canMoveUp, canMoveDown }) {
+  return (
+    <View style={[styles.quickActionOption, selected && styles.quickActionOptionActive]}>
+      <Text style={styles.quickActionOptionIcon}>{action.icon}</Text>
+      <View style={styles.quickActionOptionText}>
+        <Text style={styles.quickActionOptionLabel}>{action.label}</Text>
+        <Text style={styles.quickActionOptionSub}>{action.description}</Text>
+      </View>
+      {selected && (
+        <View style={styles.quickActionOrder}>
+          <Text style={styles.quickActionOrderText}>{order}</Text>
+          <TouchableOpacity
+            style={[styles.quickActionOrderBtn, !canMoveUp && styles.quickActionOrderBtnDisabled]}
+            onPress={onMoveUp}
+            disabled={!canMoveUp}
+            hitSlop={HIT_SLOP}
+          >
+            <Text style={styles.quickActionOrderBtnText}>↑</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.quickActionOrderBtn, !canMoveDown && styles.quickActionOrderBtnDisabled]}
+            onPress={onMoveDown}
+            disabled={!canMoveDown}
+            hitSlop={HIT_SLOP}
+          >
+            <Text style={styles.quickActionOrderBtnText}>↓</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+      <TouchableOpacity
+        style={[styles.quickActionToggle, selected && styles.quickActionToggleActive]}
+        onPress={onToggle}
+        activeOpacity={0.8}
+        hitSlop={HIT_SLOP}
+      >
+        {selected && <Text style={styles.quickActionCheck}>✓</Text>}
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 export default function ProfileScreen({ navigation }) {
   const user = useStore(s => s.user);
   const vehicles = useStore(s => s.vehicles);
@@ -164,6 +210,9 @@ export default function ProfileScreen({ navigation }) {
   const fetchInvoices = useStore(s => s.fetchInvoices);
   const fetchDocuments = useStore(s => s.fetchDocuments);
   const fetchFuelLogs = useStore(s => s.fetchFuelLogs);
+  const quickActionIds = useStore(s => s.quickActionIds);
+  const loadQuickActions = useStore(s => s.loadQuickActions);
+  const saveQuickActions = useStore(s => s.saveQuickActions);
 
   const { isTablet, hPad, maxContentWidth } = useResponsive();
 
@@ -196,6 +245,7 @@ export default function ProfileScreen({ navigation }) {
   const totalKm = (vehicles || []).reduce((s, v) => s + (Number(v.km) || 0), 0);
   const totalSpent = (invoices || []).reduce((s, i) => s + (Number(i.amount) || 0), 0);
   const totalLiters = (fuelLogs || []).reduce((s, f) => s + (Number(f.liters) || 0), 0);
+  const selectedQuickActions = normalizeQuickActionIds(quickActionIds);
 
   const loadAll = useCallback(async () => {
     await Promise.all([
@@ -223,8 +273,9 @@ export default function ProfileScreen({ navigation }) {
       setName(user.name || '');
       setPhone(user.phone || '');
       setPushEnabled(!!user.pushToken);
+      loadQuickActions();
     }
-  }, [user?.id, user?.name, user?.phone, user?.pushToken]);
+  }, [user?.id, user?.name, user?.phone, user?.pushToken, loadQuickActions]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -439,6 +490,39 @@ export default function ProfileScreen({ navigation }) {
     setDeleteConfirm(false);
   };
 
+  const toggleQuickAction = async (id) => {
+    const current = normalizeQuickActionIds(quickActionIds);
+    const exists = current.includes(id);
+    let next;
+
+    if (exists) {
+      if (current.length === 1) {
+        Alert.alert('Acțiuni rapide', 'Păstrează cel puțin o acțiune pe pagina Acasă.');
+        return;
+      }
+      next = current.filter(item => item !== id);
+    } else {
+      if (current.length >= MAX_HOME_QUICK_ACTIONS) {
+        Alert.alert('Acțiuni rapide', `Poți afișa maximum ${MAX_HOME_QUICK_ACTIONS} acțiuni.`);
+        return;
+      }
+      next = [...current, id];
+    }
+
+    await saveQuickActions(next);
+  };
+
+  const moveQuickAction = async (id, direction) => {
+    const current = normalizeQuickActionIds(quickActionIds);
+    const index = current.indexOf(id);
+    const target = index + direction;
+    if (index < 0 || target < 0 || target >= current.length) return;
+
+    const next = [...current];
+    [next[index], next[target]] = [next[target], next[index]];
+    await saveQuickActions(next);
+  };
+
   return (
     <View style={styles.root}>
       <SafeAreaView style={styles.header} edges={['top']}>
@@ -617,6 +701,32 @@ export default function ProfileScreen({ navigation }) {
               sub="Istoric alerte primite"
               onPress={() => navigation.navigate('Notifications')}
             />
+          </Card>
+
+          {/* Acțiuni rapide */}
+          <Card title="Acțiuni rapide Acasă">
+            <Text style={styles.quickActionLimit}>
+              {selectedQuickActions.length}/{MAX_HOME_QUICK_ACTIONS} active
+            </Text>
+            <View style={styles.quickActionList}>
+              {QUICK_ACTIONS.map(action => {
+                const selected = selectedQuickActions.includes(action.id);
+                const index = selectedQuickActions.indexOf(action.id);
+                return (
+                  <QuickActionOption
+                    key={action.id}
+                    action={action}
+                    selected={selected}
+                    order={index + 1}
+                    canMoveUp={selected && index > 0}
+                    canMoveDown={selected && index >= 0 && index < selectedQuickActions.length - 1}
+                    onToggle={() => toggleQuickAction(action.id)}
+                    onMoveUp={() => moveQuickAction(action.id, -1)}
+                    onMoveDown={() => moveQuickAction(action.id, 1)}
+                  />
+                );
+              })}
+            </View>
           </Card>
 
           {/* Prieteni + share */}
@@ -987,6 +1097,83 @@ const styles = StyleSheet.create({
   actionLabel: { fontSize: 15, fontWeight: FONTS.semibold, color: T.ink },
   actionSub: { fontSize: 12, fontWeight: FONTS.regular, color: T.ink3, marginTop: 2 },
   actionArrow: { fontSize: 22, color: T.ink4, marginLeft: SPACING.sm },
+  quickActionLimit: {
+    alignSelf: 'flex-start',
+    fontSize: 12,
+    fontWeight: FONTS.bold,
+    color: '#1E6F51',
+    backgroundColor: '#E8F5EE',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: 6,
+    borderRadius: RADIUS.full,
+    overflow: 'hidden',
+    marginBottom: SPACING.md,
+  },
+  quickActionList: { gap: SPACING.sm },
+  quickActionOption: {
+    minHeight: 64,
+    borderRadius: RADIUS.md,
+    borderWidth: 1.5,
+    borderColor: T.line,
+    backgroundColor: T.bgSoft,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    gap: SPACING.md,
+  },
+  quickActionOptionActive: {
+    borderColor: '#2F9E6F',
+    backgroundColor: '#F8FCF9',
+  },
+  quickActionOptionIcon: { fontSize: 24, width: 32, textAlign: 'center' },
+  quickActionOptionText: { flex: 1, minWidth: 0 },
+  quickActionOptionLabel: { fontSize: 14, fontWeight: FONTS.bold, color: T.ink },
+  quickActionOptionSub: { fontSize: 12, fontWeight: FONTS.medium, color: T.ink3, marginTop: 2 },
+  quickActionOrder: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  quickActionOrderText: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#172027',
+    color: '#fff',
+    textAlign: 'center',
+    textAlignVertical: 'center',
+    fontSize: 11,
+    fontWeight: FONTS.bold,
+    paddingTop: IS_IOS ? 4 : 0,
+    overflow: 'hidden',
+  },
+  quickActionOrderBtn: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: T.card,
+    borderWidth: 1,
+    borderColor: T.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickActionOrderBtnDisabled: { opacity: 0.28 },
+  quickActionOrderBtnText: { fontSize: 14, fontWeight: FONTS.bold, color: T.ink2 },
+  quickActionToggle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: T.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickActionToggleActive: {
+    borderColor: '#2F9E6F',
+    backgroundColor: '#2F9E6F',
+  },
+  quickActionCheck: { color: '#fff', fontSize: 14, fontWeight: FONTS.bold },
   logoutBtn: {
     flexDirection: 'row',
     alignItems: 'center',

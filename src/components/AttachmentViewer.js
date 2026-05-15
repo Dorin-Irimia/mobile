@@ -22,7 +22,7 @@ export default function AttachmentViewer({ visible, attachment, onClose }) {
   if (!attachment) return null;
 
   const apiUrl = getApiUrl();
-  const fullUrl = attachment.fileUrl?.startsWith('http')
+  const fullUrl = attachment.fileUrl?.startsWith('http') || attachment.fileUrl?.startsWith('file:')
     ? attachment.fileUrl
     : `${apiUrl}${attachment.fileUrl}`;
   const isImage = attachment.kind === 'image' || (attachment.mimeType || '').startsWith('image/');

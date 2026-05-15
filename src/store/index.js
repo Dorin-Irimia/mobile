@@ -1,8 +1,20 @@
 import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
 import api from '../api/client';
-import { saveCache, loadCache, enqueue, getQueue } from '../utils/storage';
-import { processSyncQueue } from '../utils/syncManager';
+import {
+  saveCache,
+  loadCache,
+  enqueue,
+  getQueue,
+  setStorageScope,
+  createClientId,
+  formDataToObject,
+  removePendingCreate,
+} from '../utils/storage';
+import { processSyncQueue, pullServerState } from '../utils/syncManager';
+import { DEFAULT_QUICK_ACTION_IDS, normalizeQuickActionIds } from '../utils/quickActions';
+
+const PENDING_REGISTRATION_KEY = 'pendingRegistration';
 
 async function saveAuth(key, value) {
   try { await SecureStore.setItemAsync(key, typeof value === 'string' ? value : JSON.stringify(value)); } catch {}
@@ -12,6 +24,146 @@ async function loadAuth(key) {
 }
 async function removeAuth(key) {
   try { await SecureStore.deleteItemAsync(key); } catch {}
+}
+
+async function savePendingRegistration(data) {
+  try { await SecureStore.setItemAsync(PENDING_REGISTRATION_KEY, JSON.stringify(data)); } catch {}
+}
+
+async function loadPendingRegistration() {
+  try {
+    const raw = await SecureStore.getItemAsync(PENDING_REGISTRATION_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function removePendingRegistration() {
+  try { await SecureStore.deleteItemAsync(PENDING_REGISTRATION_KEY); } catch {}
+}
+
+function scopeForUser(user) {
+  return user?.email ? user.email.trim().toLowerCase() : user?.id;
+}
+
+function normalizeEmail(email) {
+  return String(email || '').trim().toLowerCase();
+}
+
+function isNetworkError(e) {
+  return !e.response;
+}
+
+function isFormData(payload) {
+  return payload && typeof payload.append === 'function';
+}
+
+function ensureClientId(payload, clientId) {
+  if (isFormData(payload)) {
+    payload.append('clientId', clientId);
+    return payload;
+  }
+  return { ...(payload || {}), clientId };
+}
+
+function payloadSnapshot(payload) {
+  if (isFormData(payload)) return formDataToObject(payload);
+  return { fields: payload || {}, files: [] };
+}
+
+function parseMaybeNumber(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseCustomFields(value, fallback = null) {
+  if (!value) return fallback;
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
+function optimisticAttachments(files) {
+  return (files || []).map((file, index) => ({
+    id: createClientId('att'),
+    fileName: file.name || `file-${index}`,
+    fileUrl: file.uri,
+    mimeType: file.type || 'application/octet-stream',
+    fileSize: 0,
+    kind: (file.type || '').startsWith('image/') ? 'image' : file.type === 'application/pdf' ? 'pdf' : 'other',
+    _offline: true,
+  }));
+}
+
+function invoiceFromPayload(fields, files, clientId) {
+  return {
+    id: clientId,
+    clientId,
+    vehicleId: fields.vehicleId,
+    title: fields.title,
+    amount: parseMaybeNumber(fields.amount) || 0,
+    currency: fields.currency || 'RON',
+    category: fields.category || 'altele',
+    date: fields.date,
+    time: fields.time || null,
+    km: parseMaybeNumber(fields.km),
+    merchant: fields.merchant || null,
+    location: fields.location || null,
+    notes: fields.notes || null,
+    customFields: parseCustomFields(fields.customFields),
+    attachments: optimisticAttachments(files),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    _offline: true,
+  };
+}
+
+function fuelFromPayload(fields, files, clientId) {
+  const liters = parseMaybeNumber(fields.liters) || 0;
+  const pricePerL = parseMaybeNumber(fields.pricePerL) || 0;
+  return {
+    id: clientId,
+    clientId,
+    vehicleId: fields.vehicleId,
+    date: fields.date,
+    time: fields.time || null,
+    liters,
+    pricePerL,
+    total: liters * pricePerL,
+    km: parseMaybeNumber(fields.km) || 0,
+    station: fields.station || null,
+    location: fields.location || null,
+    fuelType: fields.fuelType || null,
+    fullTank: fields.fullTank !== 'false',
+    notes: fields.notes || null,
+    customFields: parseCustomFields(fields.customFields),
+    attachments: optimisticAttachments(files),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    _offline: true,
+  };
+}
+
+function documentFromPayload(fields, files, clientId) {
+  const firstFile = files?.[0];
+  return {
+    id: clientId,
+    clientId,
+    name: fields.name,
+    type: fields.type,
+    vehicleId: fields.vehicleId || null,
+    expiryDate: fields.expiryDate || null,
+    fileUrl: firstFile?.uri || null,
+    isSigned: false,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    _offline: true,
+  };
 }
 
 const useStore = create((set, get) => ({
@@ -26,6 +178,7 @@ const useStore = create((set, get) => ({
   pendingFriends: [],
   sentFriends: [],
   vehicleMembersById: {},
+  quickActionIds: DEFAULT_QUICK_ACTION_IDS,
   isLoading: false,
   isOnline: true,
   isSyncing: false,
@@ -36,21 +189,88 @@ const useStore = create((set, get) => ({
   setLoading: (isLoading) => set({ isLoading }),
   setError: (error) => set({ error }),
 
+  loadQuickActions: async () => {
+    const saved = await loadCache('quickActions');
+    const quickActionIds = normalizeQuickActionIds(saved || DEFAULT_QUICK_ACTION_IDS);
+    set({ quickActionIds });
+    return quickActionIds;
+  },
+
+  saveQuickActions: async (ids) => {
+    const quickActionIds = normalizeQuickActionIds(ids);
+    set({ quickActionIds });
+    await saveCache('quickActions', quickActionIds);
+    return quickActionIds;
+  },
+
+  applyServerState: async (data) => {
+    if (!data) return;
+    if (data.user) {
+      await saveAuth('user', data.user);
+      setStorageScope(scopeForUser(data.user));
+    }
+    set({
+      user: data.user || get().user,
+      vehicles: data.vehicles || [],
+      invoices: data.invoices || [],
+      reminders: data.reminders || [],
+      documents: data.documents || [],
+      fuelLogs: data.fuelLogs || [],
+      notifications: data.notifications || [],
+      vehicleMembersById: data.vehicleMembersById || get().vehicleMembersById,
+    });
+    await Promise.all([
+      saveCache('vehicles', data.vehicles || []),
+      saveCache('invoices', data.invoices || []),
+      saveCache('reminders', data.reminders || []),
+      saveCache('documents', data.documents || []),
+      saveCache('fuel', data.fuelLogs || []),
+      saveCache('notifications', data.notifications || []),
+      saveCache('vehicleMembersById', data.vehicleMembersById || {}),
+    ]);
+  },
+
   syncOnReconnect: async () => {
     set({ isSyncing: true });
     try {
+      const pendingRegistration = await loadPendingRegistration();
+      if (pendingRegistration) {
+        let authData;
+        try {
+          const response = await api.post('/auth/register', pendingRegistration);
+          authData = response.data;
+        } catch (e) {
+          if (e.response?.status === 409) {
+            const response = await api.post('/auth/login', {
+              email: pendingRegistration.email,
+              password: pendingRegistration.password,
+            });
+            authData = response.data;
+          } else {
+            throw e;
+          }
+        }
+        await saveAuth('accessToken', authData.accessToken);
+        await saveAuth('refreshToken', authData.refreshToken);
+        await saveAuth('user', authData.user);
+        await removePendingRegistration();
+        setStorageScope(scopeForUser(authData.user));
+        await get().loadQuickActions();
+        set({ user: authData.user });
+      }
+
       const queue = await getQueue();
+      set({ pendingCount: queue.length });
       if (queue.length > 0) {
         await processSyncQueue((done, total) => {
           set({ pendingCount: total - done });
         });
       }
-      const s = get();
-      await s.fetchVehicles();
-      await s.fetchReminders();
-      await s.fetchNotifications();
+      const serverState = await pullServerState();
+      await get().applyServerState(serverState);
     } finally {
-      set({ isSyncing: false, pendingCount: 0 });
+      const remaining = await getQueue();
+      set({ isSyncing: false, pendingCount: remaining.length });
     }
   },
 
@@ -58,20 +278,24 @@ const useStore = create((set, get) => ({
   login: async (email, password) => {
     set({ isLoading: true, error: null });
     try {
-      const { data } = await api.post('/auth/login', { email, password });
+      const { data } = await api.post('/auth/login', { email: normalizeEmail(email), password });
       await saveAuth('accessToken', data.accessToken);
       await saveAuth('refreshToken', data.refreshToken);
       await saveAuth('user', data.user);
+      setStorageScope(scopeForUser(data.user));
+      await get().loadQuickActions();
       set({ user: data.user, isLoading: false });
       return { success: true };
     } catch (e) {
       // Network error → try offline login with cached credentials
-      if (!e.response) {
+      if (isNetworkError(e)) {
         const stored = await loadAuth('user');
         if (stored) {
           try {
             const cachedUser = JSON.parse(stored);
-            if (cachedUser.email === email.trim()) {
+            if (normalizeEmail(cachedUser.email) === normalizeEmail(email)) {
+              setStorageScope(scopeForUser(cachedUser));
+              await get().loadQuickActions();
               set({ user: cachedUser, isLoading: false });
               return { success: true };
             }
@@ -88,14 +312,36 @@ const useStore = create((set, get) => ({
 
   register: async (email, password, name, phone) => {
     set({ isLoading: true, error: null });
+    const normalizedEmail = normalizeEmail(email);
     try {
-      const { data } = await api.post('/auth/register', { email, password, name, phone });
+      const { data } = await api.post('/auth/register', { email: normalizedEmail, password, name, phone });
       await saveAuth('accessToken', data.accessToken);
       await saveAuth('refreshToken', data.refreshToken);
       await saveAuth('user', data.user);
+      await removePendingRegistration();
+      setStorageScope(scopeForUser(data.user));
+      await get().loadQuickActions();
       set({ user: data.user, isLoading: false });
       return { success: true };
     } catch (e) {
+      if (isNetworkError(e)) {
+        const localUser = {
+          id: createClientId('user'),
+          email: normalizedEmail,
+          name,
+          phone,
+          role: 'user',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          _offlineRegistration: true,
+        };
+        await savePendingRegistration({ email: normalizedEmail, password, name, phone });
+        await saveAuth('user', localUser);
+        setStorageScope(scopeForUser(localUser));
+        await get().loadQuickActions();
+        set({ user: localUser, isLoading: false });
+        return { success: true, offline: true };
+      }
       const msg = e.response?.data?.error || 'Eroare la înregistrare.';
       set({ error: msg, isLoading: false });
       return { success: false, error: msg };
@@ -110,13 +356,19 @@ const useStore = create((set, get) => ({
     await removeAuth('accessToken');
     await removeAuth('refreshToken');
     await removeAuth('user');
+    setStorageScope('anonymous');
     set({ user: null, vehicles: [], invoices: [], reminders: [], documents: [], fuelLogs: [], notifications: [] });
   },
 
   restoreAuth: async () => {
     const stored = await loadAuth('user');
     if (stored) {
-      try { set({ user: JSON.parse(stored) }); } catch {}
+      try {
+        const user = JSON.parse(stored);
+        setStorageScope(scopeForUser(user));
+        set({ user });
+        get().loadQuickActions();
+      } catch {}
     }
   },
 
@@ -245,14 +497,40 @@ const useStore = create((set, get) => ({
 
   // ── Vehicle members ────────────────────────────────────────────────────────
   fetchVehicleMembers: async (vehicleId) => {
+    const { isOnline } = get();
+    if (!isOnline) {
+      const cached = await loadCache('vehicleMembersById');
+      if (cached?.[vehicleId]) {
+        set(s => ({
+          vehicleMembersById: { ...s.vehicleMembersById, [vehicleId]: cached[vehicleId] },
+        }));
+        return cached[vehicleId];
+      }
+      return null;
+    }
     const { data } = await api.get(`/vehicles/${vehicleId}/members`);
     set(s => ({
       vehicleMembersById: { ...s.vehicleMembersById, [vehicleId]: data },
     }));
+    await saveCache('vehicleMembersById', get().vehicleMembersById);
     return data;
   },
 
   addVehicleMember: async (vehicleId, payload) => {
+    const { isOnline } = get();
+    if (!isOnline) {
+      await enqueue({
+        entity: 'vehicleMembers',
+        action: 'create',
+        method: 'POST',
+        endpoint: `/vehicles/${vehicleId}/members`,
+        payload,
+        localId: vehicleId,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
+      return { ...payload, _offline: true };
+    }
     const { data } = await api.post(`/vehicles/${vehicleId}/members`, payload);
     set(s => {
       const existing = s.vehicleMembersById[vehicleId];
@@ -271,6 +549,34 @@ const useStore = create((set, get) => ({
   },
 
   removeVehicleMember: async (vehicleId, userId) => {
+    const { isOnline } = get();
+    if (!isOnline) {
+      set(s => {
+        const existing = s.vehicleMembersById[vehicleId];
+        if (!existing) return s;
+        return {
+          vehicleMembersById: {
+            ...s.vehicleMembersById,
+            [vehicleId]: {
+              ...existing,
+              members: existing.members.filter(m => m.user.id !== userId),
+            },
+          },
+        };
+      });
+      await saveCache('vehicleMembersById', get().vehicleMembersById);
+      await enqueue({
+        entity: 'vehicleMembers',
+        action: 'delete',
+        method: 'DELETE',
+        endpoint: `/vehicles/${vehicleId}/members/${userId}`,
+        payload: null,
+        localId: vehicleId,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
+      return;
+    }
     await api.delete(`/vehicles/${vehicleId}/members/${userId}`);
     set(s => {
       const existing = s.vehicleMembersById[vehicleId];
@@ -290,6 +596,24 @@ const useStore = create((set, get) => ({
   leaveVehicle: async (vehicleId) => {
     const me = get().user?.id;
     if (!me) return;
+    const { isOnline } = get();
+    if (!isOnline) {
+      set(s => ({
+        vehicles: s.vehicles.filter(v => v.id !== vehicleId),
+      }));
+      await saveCache('vehicles', get().vehicles);
+      await enqueue({
+        entity: 'vehicleMembers',
+        action: 'delete',
+        method: 'DELETE',
+        endpoint: `/vehicles/${vehicleId}/members/${me}`,
+        payload: null,
+        localId: vehicleId,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
+      return;
+    }
     await api.delete(`/vehicles/${vehicleId}/members/${me}`);
     set(s => ({
       vehicles: s.vehicles.filter(v => v.id !== vehicleId),
@@ -317,28 +641,56 @@ const useStore = create((set, get) => ({
 
   addVehicle: async (v) => {
     const { isOnline } = get();
-    const tempId = `offline-${Date.now()}`;
+    const clientId = createClientId('vehicle');
     const { photoUri, ...vehicleData } = v;
+    const payload = ensureClientId(vehicleData, clientId);
 
     if (!isOnline) {
-      const optimistic = { ...vehicleData, id: tempId, photo: photoUri || null, createdAt: new Date().toISOString(), _offline: true };
+      let queuedPayload = payload;
+      if (photoUri) {
+        queuedPayload = new FormData();
+        Object.entries(payload).forEach(([k, val]) => {
+          if (val !== undefined && val !== null) queuedPayload.append(k, String(val));
+        });
+        queuedPayload.append('vehiclePhoto', { uri: photoUri, name: 'vehicle.jpg', type: 'image/jpeg' });
+      }
+      const optimistic = {
+        ...vehicleData,
+        id: clientId,
+        clientId,
+        photo: photoUri || null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        isOwner: true,
+        role: 'owner',
+        _offline: true,
+      };
       set(s => ({ vehicles: [optimistic, ...s.vehicles] }));
       await saveCache('vehicles', get().vehicles);
-      await enqueue({ method: 'POST', endpoint: '/vehicles', payload: vehicleData });
-      set(s => ({ pendingCount: s.pendingCount + 1 }));
+      await enqueue({
+        entity: 'vehicles',
+        action: 'create',
+        method: 'POST',
+        endpoint: '/vehicles',
+        payload: queuedPayload,
+        localId: clientId,
+        clientId,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
       return optimistic;
     }
 
     let response;
     if (photoUri) {
       const fd = new FormData();
-      Object.entries(vehicleData).forEach(([k, val]) => {
+      Object.entries(payload).forEach(([k, val]) => {
         if (val !== undefined && val !== null) fd.append(k, String(val));
       });
       fd.append('vehiclePhoto', { uri: photoUri, name: 'vehicle.jpg', type: 'image/jpeg' });
       response = await api.post('/vehicles', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
     } else {
-      response = await api.post('/vehicles', vehicleData);
+      response = await api.post('/vehicles', payload);
     }
     set(s => ({ vehicles: [response.data, ...s.vehicles] }));
     await saveCache('vehicles', get().vehicles);
@@ -352,8 +704,24 @@ const useStore = create((set, get) => ({
 
     if (!isOnline) {
       await saveCache('vehicles', get().vehicles);
-      await enqueue({ method: 'PUT', endpoint: `/vehicles/${id}`, payload: vehicleData });
-      set(s => ({ pendingCount: s.pendingCount + 1 }));
+      let queuedPayload = vehicleData;
+      if (photoUri) {
+        queuedPayload = new FormData();
+        Object.entries(vehicleData).forEach(([k, val]) => {
+          if (val !== undefined && val !== null) queuedPayload.append(k, String(val));
+        });
+        queuedPayload.append('vehiclePhoto', { uri: photoUri, name: 'vehicle.jpg', type: 'image/jpeg' });
+      }
+      await enqueue({
+        entity: 'vehicles',
+        action: 'update',
+        method: 'PUT',
+        endpoint: `/vehicles/${id}`,
+        payload: queuedPayload,
+        localId: id,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
       return;
     }
 
@@ -376,11 +744,34 @@ const useStore = create((set, get) => ({
   deleteVehicle: async (id) => {
     const { isOnline } = get();
     set(s => ({ vehicles: s.vehicles.filter(v => v.id !== id) }));
+    set(s => ({
+      documents: s.documents.filter(d => d.vehicleId !== id),
+      invoices: s.invoices.filter(i => i.vehicleId !== id),
+      reminders: s.reminders.filter(r => r.vehicleId !== id),
+      fuelLogs: s.fuelLogs.filter(f => f.vehicleId !== id),
+    }));
     await saveCache('vehicles', get().vehicles);
+    await Promise.all([
+      saveCache('documents', get().documents),
+      saveCache('invoices', get().invoices),
+      saveCache('reminders', get().reminders),
+      saveCache('fuel', get().fuelLogs),
+    ]);
 
     if (!isOnline) {
-      await enqueue({ method: 'DELETE', endpoint: `/vehicles/${id}`, payload: null });
-      set(s => ({ pendingCount: s.pendingCount + 1 }));
+      const removedLocalCreate = await removePendingCreate('vehicles', id);
+      if (!removedLocalCreate) {
+        await enqueue({
+          entity: 'vehicles',
+          action: 'delete',
+          method: 'DELETE',
+          endpoint: `/vehicles/${id}`,
+          payload: null,
+          localId: id,
+        });
+      }
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
       return;
     }
 
@@ -394,7 +785,12 @@ const useStore = create((set, get) => ({
 
     if (!isOnline) {
       const cached = await loadCache(cacheKey);
-      if (cached) set({ documents: cached });
+      if (cached) {
+        set({ documents: cached });
+      } else if (vehicleId) {
+        const all = await loadCache('documents');
+        if (all) set({ documents: all.filter(d => d.vehicleId === vehicleId) });
+      }
       return;
     }
     try {
@@ -408,6 +804,29 @@ const useStore = create((set, get) => ({
   },
 
   addDocument: async (formData) => {
+    const { isOnline } = get();
+    const clientId = createClientId('document');
+    formData.append('clientId', clientId);
+    const { fields, files } = payloadSnapshot(formData);
+
+    if (!isOnline) {
+      const optimistic = documentFromPayload(fields, files, clientId);
+      set(s => ({ documents: [optimistic, ...s.documents] }));
+      await saveCache('documents', get().documents);
+      await enqueue({
+        entity: 'documents',
+        action: 'create',
+        method: 'POST',
+        endpoint: '/documents',
+        payload: formData,
+        localId: clientId,
+        clientId,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
+      return optimistic;
+    }
+
     const { data } = await api.post('/documents', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
     set(s => ({ documents: [data, ...s.documents] }));
     await saveCache('documents', get().documents);
@@ -420,8 +839,16 @@ const useStore = create((set, get) => ({
 
     if (!isOnline) {
       await saveCache('documents', get().documents);
-      await enqueue({ method: 'PUT', endpoint: `/documents/${id}/sign`, payload: { signatureData } });
-      set(s => ({ pendingCount: s.pendingCount + 1 }));
+      await enqueue({
+        entity: 'documents',
+        action: 'sign',
+        method: 'PUT',
+        endpoint: `/documents/${id}/sign`,
+        payload: { signatureData },
+        localId: id,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
       return;
     }
 
@@ -437,8 +864,19 @@ const useStore = create((set, get) => ({
     await saveCache('documents', get().documents);
 
     if (!isOnline) {
-      await enqueue({ method: 'DELETE', endpoint: `/documents/${id}`, payload: null });
-      set(s => ({ pendingCount: s.pendingCount + 1 }));
+      const removedLocalCreate = await removePendingCreate('documents', id);
+      if (!removedLocalCreate) {
+        await enqueue({
+          entity: 'documents',
+          action: 'delete',
+          method: 'DELETE',
+          endpoint: `/documents/${id}`,
+          payload: null,
+          localId: id,
+        });
+      }
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
       return;
     }
 
@@ -452,7 +890,12 @@ const useStore = create((set, get) => ({
 
     if (!isOnline) {
       const cached = await loadCache(cacheKey);
-      if (cached) set({ invoices: cached });
+      if (cached) {
+        set({ invoices: cached });
+      } else if (vehicleId) {
+        const all = await loadCache('invoices');
+        if (all) set({ invoices: all.filter(i => i.vehicleId === vehicleId) });
+      }
       return;
     }
     try {
@@ -466,6 +909,29 @@ const useStore = create((set, get) => ({
   },
 
   addInvoice: async (formData) => {
+    const { isOnline } = get();
+    const clientId = createClientId('invoice');
+    formData.append('clientId', clientId);
+    const { fields, files } = payloadSnapshot(formData);
+
+    if (!isOnline) {
+      const optimistic = invoiceFromPayload(fields, files, clientId);
+      set(s => ({ invoices: [optimistic, ...s.invoices] }));
+      await saveCache('invoices', get().invoices);
+      await enqueue({
+        entity: 'invoices',
+        action: 'create',
+        method: 'POST',
+        endpoint: '/invoices',
+        payload: formData,
+        localId: clientId,
+        clientId,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
+      return optimistic;
+    }
+
     const { data } = await api.post('/invoices', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
     set(s => ({ invoices: [data, ...s.invoices] }));
     await saveCache('invoices', get().invoices);
@@ -473,6 +939,39 @@ const useStore = create((set, get) => ({
   },
 
   updateInvoice: async (id, formData) => {
+    const { isOnline } = get();
+    const { fields, files } = payloadSnapshot(formData);
+
+    if (!isOnline) {
+      set(s => ({
+        invoices: s.invoices.map(i => {
+          if (i.id !== id) return i;
+          return {
+            ...i,
+            ...fields,
+            amount: fields.amount !== undefined ? parseMaybeNumber(fields.amount) || i.amount : i.amount,
+            km: fields.km !== undefined ? parseMaybeNumber(fields.km) : i.km,
+            customFields: parseCustomFields(fields.customFields, i.customFields),
+            attachments: [...(i.attachments || []), ...optimisticAttachments(files)],
+            updatedAt: new Date().toISOString(),
+            _offline: true,
+          };
+        }),
+      }));
+      await saveCache('invoices', get().invoices);
+      await enqueue({
+        entity: 'invoices',
+        action: 'update',
+        method: 'PUT',
+        endpoint: `/invoices/${id}`,
+        payload: formData,
+        localId: id,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
+      return get().invoices.find(i => i.id === id);
+    }
+
     const { data } = await api.put(`/invoices/${id}`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
     set(s => ({ invoices: s.invoices.map(i => i.id === id ? data : i) }));
     await saveCache('invoices', get().invoices);
@@ -480,6 +979,30 @@ const useStore = create((set, get) => ({
   },
 
   addInvoiceAttachments: async (id, formData) => {
+    const { isOnline } = get();
+    const { files } = payloadSnapshot(formData);
+
+    if (!isOnline) {
+      const optimistic = optimisticAttachments(files);
+      set(s => ({
+        invoices: s.invoices.map(i =>
+          i.id === id ? { ...i, attachments: [...(i.attachments || []), ...optimistic] } : i,
+        ),
+      }));
+      await saveCache('invoices', get().invoices);
+      await enqueue({
+        entity: 'invoiceAttachments',
+        action: 'create',
+        method: 'POST',
+        endpoint: `/invoices/${id}/attachments`,
+        payload: formData,
+        localId: id,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
+      return optimistic;
+    }
+
     const { data } = await api.post(`/invoices/${id}/attachments`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
     set(s => ({
       invoices: s.invoices.map(i =>
@@ -491,6 +1014,32 @@ const useStore = create((set, get) => ({
   },
 
   deleteInvoiceAttachment: async (invoiceId, attId) => {
+    const { isOnline } = get();
+    set(s => ({
+      invoices: s.invoices.map(i =>
+        i.id === invoiceId
+          ? { ...i, attachments: (i.attachments || []).filter(a => a.id !== attId) }
+          : i,
+      ),
+    }));
+    await saveCache('invoices', get().invoices);
+
+    if (!isOnline) {
+      if (!String(attId).startsWith('att-')) {
+        await enqueue({
+          entity: 'invoiceAttachments',
+          action: 'delete',
+          method: 'DELETE',
+          endpoint: `/invoices/${invoiceId}/attachments/${attId}`,
+          payload: null,
+          localId: attId,
+        });
+      }
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
+      return;
+    }
+
     await api.delete(`/invoices/${invoiceId}/attachments/${attId}`);
     set(s => ({
       invoices: s.invoices.map(i =>
@@ -508,8 +1057,19 @@ const useStore = create((set, get) => ({
     await saveCache('invoices', get().invoices);
 
     if (!isOnline) {
-      await enqueue({ method: 'DELETE', endpoint: `/invoices/${id}`, payload: null });
-      set(s => ({ pendingCount: s.pendingCount + 1 }));
+      const removedLocalCreate = await removePendingCreate('invoices', id);
+      if (!removedLocalCreate) {
+        await enqueue({
+          entity: 'invoices',
+          action: 'delete',
+          method: 'DELETE',
+          endpoint: `/invoices/${id}`,
+          payload: null,
+          localId: id,
+        });
+      }
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
       return;
     }
 
@@ -537,18 +1097,28 @@ const useStore = create((set, get) => ({
 
   addReminder: async (r) => {
     const { isOnline } = get();
-    const tempId = `offline-${Date.now()}`;
+    const clientId = createClientId('reminder');
+    const payload = ensureClientId(r, clientId);
 
     if (!isOnline) {
-      const optimistic = { ...r, id: tempId, isDone: false, createdAt: new Date().toISOString(), _offline: true };
+      const optimistic = { ...r, id: clientId, clientId, isDone: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), _offline: true };
       set(s => ({ reminders: [optimistic, ...s.reminders] }));
       await saveCache('reminders', get().reminders);
-      await enqueue({ method: 'POST', endpoint: '/reminders', payload: r });
-      set(s => ({ pendingCount: s.pendingCount + 1 }));
+      await enqueue({
+        entity: 'reminders',
+        action: 'create',
+        method: 'POST',
+        endpoint: '/reminders',
+        payload,
+        localId: clientId,
+        clientId,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
       return optimistic;
     }
 
-    const { data } = await api.post('/reminders', r);
+    const { data } = await api.post('/reminders', payload);
     set(s => ({ reminders: [data, ...s.reminders] }));
     await saveCache('reminders', get().reminders);
     return data;
@@ -560,8 +1130,16 @@ const useStore = create((set, get) => ({
     await saveCache('reminders', get().reminders);
 
     if (!isOnline) {
-      await enqueue({ method: 'PUT', endpoint: `/reminders/${id}`, payload: patch });
-      set(s => ({ pendingCount: s.pendingCount + 1 }));
+      await enqueue({
+        entity: 'reminders',
+        action: 'update',
+        method: 'PUT',
+        endpoint: `/reminders/${id}`,
+        payload: patch,
+        localId: id,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
       return;
     }
 
@@ -577,8 +1155,19 @@ const useStore = create((set, get) => ({
     await saveCache('reminders', get().reminders);
 
     if (!isOnline) {
-      await enqueue({ method: 'DELETE', endpoint: `/reminders/${id}`, payload: null });
-      set(s => ({ pendingCount: s.pendingCount + 1 }));
+      const removedLocalCreate = await removePendingCreate('reminders', id);
+      if (!removedLocalCreate) {
+        await enqueue({
+          entity: 'reminders',
+          action: 'delete',
+          method: 'DELETE',
+          endpoint: `/reminders/${id}`,
+          payload: null,
+          localId: id,
+        });
+      }
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
       return;
     }
 
@@ -592,7 +1181,12 @@ const useStore = create((set, get) => ({
 
     if (!isOnline) {
       const cached = await loadCache(cacheKey);
-      if (cached) set({ fuelLogs: cached });
+      if (cached) {
+        set({ fuelLogs: cached });
+      } else if (vehicleId) {
+        const all = await loadCache('fuel');
+        if (all) set({ fuelLogs: all.filter(f => f.vehicleId === vehicleId) });
+      }
       return;
     }
     try {
@@ -608,26 +1202,76 @@ const useStore = create((set, get) => ({
   addFuelLog: async (payload) => {
     const { isOnline } = get();
     const isFormData = payload && typeof payload.append === 'function';
-    const tempId = `offline-${Date.now()}`;
+    const clientId = createClientId('fuel');
+    const queuedPayload = ensureClientId(payload, clientId);
+    const { fields, files } = payloadSnapshot(queuedPayload);
 
-    if (!isOnline && !isFormData) {
-      const optimistic = { ...payload, id: tempId, createdAt: new Date().toISOString(), _offline: true };
+    if (!isOnline) {
+      const optimistic = isFormData
+        ? fuelFromPayload(fields, files, clientId)
+        : { ...queuedPayload, id: clientId, clientId, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), _offline: true };
       set(s => ({ fuelLogs: [optimistic, ...s.fuelLogs] }));
       await saveCache('fuel', get().fuelLogs);
-      await enqueue({ method: 'POST', endpoint: '/fuel', payload });
-      set(s => ({ pendingCount: s.pendingCount + 1 }));
+      await enqueue({
+        entity: 'fuelLogs',
+        action: 'create',
+        method: 'POST',
+        endpoint: '/fuel',
+        payload: queuedPayload,
+        localId: clientId,
+        clientId,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
       return optimistic;
     }
 
     const config = isFormData ? { headers: { 'Content-Type': 'multipart/form-data' } } : {};
-    const { data } = await api.post('/fuel', payload, config);
+    const { data } = await api.post('/fuel', queuedPayload, config);
     set(s => ({ fuelLogs: [data, ...s.fuelLogs] }));
     await saveCache('fuel', get().fuelLogs);
     return data;
   },
 
   updateFuelLog: async (id, payload) => {
+    const { isOnline } = get();
     const isFormData = payload && typeof payload.append === 'function';
+    const { fields, files } = payloadSnapshot(payload);
+
+    if (!isOnline) {
+      set(s => ({
+        fuelLogs: s.fuelLogs.map(f => {
+          if (f.id !== id) return f;
+          const liters = fields.liters !== undefined ? parseMaybeNumber(fields.liters) || f.liters : f.liters;
+          const pricePerL = fields.pricePerL !== undefined ? parseMaybeNumber(fields.pricePerL) || f.pricePerL : f.pricePerL;
+          return {
+            ...f,
+            ...fields,
+            liters,
+            pricePerL,
+            total: liters * pricePerL,
+            km: fields.km !== undefined ? parseMaybeNumber(fields.km) || f.km : f.km,
+            customFields: parseCustomFields(fields.customFields, f.customFields),
+            attachments: [...(f.attachments || []), ...optimisticAttachments(files)],
+            updatedAt: new Date().toISOString(),
+            _offline: true,
+          };
+        }),
+      }));
+      await saveCache('fuel', get().fuelLogs);
+      await enqueue({
+        entity: 'fuelLogs',
+        action: 'update',
+        method: 'PUT',
+        endpoint: `/fuel/${id}`,
+        payload,
+        localId: id,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
+      return get().fuelLogs.find(f => f.id === id);
+    }
+
     const config = isFormData ? { headers: { 'Content-Type': 'multipart/form-data' } } : {};
     const { data } = await api.put(`/fuel/${id}`, payload, config);
     set(s => ({ fuelLogs: s.fuelLogs.map(f => f.id === id ? data : f) }));
@@ -636,12 +1280,57 @@ const useStore = create((set, get) => ({
   },
 
   deleteFuelLog: async (id) => {
+    const { isOnline } = get();
+    set(s => ({ fuelLogs: s.fuelLogs.filter(f => f.id !== id) }));
+    await saveCache('fuel', get().fuelLogs);
+
+    if (!isOnline) {
+      const removedLocalCreate = await removePendingCreate('fuelLogs', id);
+      if (!removedLocalCreate) {
+        await enqueue({
+          entity: 'fuelLogs',
+          action: 'delete',
+          method: 'DELETE',
+          endpoint: `/fuel/${id}`,
+          payload: null,
+          localId: id,
+        });
+      }
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
+      return;
+    }
+
     await api.delete(`/fuel/${id}`);
     set(s => ({ fuelLogs: s.fuelLogs.filter(f => f.id !== id) }));
     await saveCache('fuel', get().fuelLogs);
   },
 
   addFuelAttachments: async (id, formData) => {
+    const { isOnline } = get();
+    const { files } = payloadSnapshot(formData);
+
+    if (!isOnline) {
+      const optimistic = optimisticAttachments(files);
+      set(s => ({
+        fuelLogs: s.fuelLogs.map(f =>
+          f.id === id ? { ...f, attachments: [...(f.attachments || []), ...optimistic] } : f,
+        ),
+      }));
+      await saveCache('fuel', get().fuelLogs);
+      await enqueue({
+        entity: 'fuelAttachments',
+        action: 'create',
+        method: 'POST',
+        endpoint: `/fuel/${id}/attachments`,
+        payload: formData,
+        localId: id,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
+      return optimistic;
+    }
+
     const { data } = await api.post(`/fuel/${id}/attachments`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
     set(s => ({
       fuelLogs: s.fuelLogs.map(f =>
@@ -653,6 +1342,32 @@ const useStore = create((set, get) => ({
   },
 
   deleteFuelAttachment: async (fuelId, attId) => {
+    const { isOnline } = get();
+    set(s => ({
+      fuelLogs: s.fuelLogs.map(f =>
+        f.id === fuelId
+          ? { ...f, attachments: (f.attachments || []).filter(a => a.id !== attId) }
+          : f,
+      ),
+    }));
+    await saveCache('fuel', get().fuelLogs);
+
+    if (!isOnline) {
+      if (!String(attId).startsWith('att-')) {
+        await enqueue({
+          entity: 'fuelAttachments',
+          action: 'delete',
+          method: 'DELETE',
+          endpoint: `/fuel/${fuelId}/attachments/${attId}`,
+          payload: null,
+          localId: attId,
+        });
+      }
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
+      return;
+    }
+
     await api.delete(`/fuel/${fuelId}/attachments/${attId}`);
     set(s => ({
       fuelLogs: s.fuelLogs.map(f =>
