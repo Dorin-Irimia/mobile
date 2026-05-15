@@ -1,20 +1,59 @@
+import 'react-native-gesture-handler';
+import React, { useEffect, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  View,
+  KeyboardAvoidingView,
+  Platform,
+  StatusBar as RNStatusBar,
+} from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-export default function App() {
+import AppNavigator, { navigationRef } from './src/navigation';
+import AuthScreen from './src/screens/AuthScreen';
+import useStore from './src/store';
+import NetworkBadge from './src/components/NetworkBadge';
+import { useNetworkMonitor } from './src/hooks/useNetwork';
+import { usePushNotifications } from './src/hooks/usePushNotifications';
+import { loadApiUrl } from './src/api/client';
+import { T } from './src/theme';
+
+function AppContent() {
+  const { user, restoreAuth } = useStore();
+  const [loading, setLoading] = useState(true);
+  useNetworkMonitor();
+  usePushNotifications(navigationRef);
+
+  useEffect(() => {
+    loadApiUrl().then(() => restoreAuth()).finally(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: T.bg }}>
+        <ActivityIndicator size="large" color={T.brand} />
+      </View>
+    );
+  }
+
   return (
-    <View style={styles.container}>
-      <Text>Open up App.js to start working on your app!</Text>
-      <StatusBar style="auto" />
-    </View>
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      enabled={Platform.OS === 'ios'}
+    >
+      <StatusBar style="dark" backgroundColor={T.brand} translucent={Platform.OS === 'android'} />
+      {user ? <AppNavigator /> : <AuthScreen />}
+      <NetworkBadge />
+    </KeyboardAvoidingView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
+export default function App() {
+  return (
+    <SafeAreaProvider>
+      <AppContent />
+    </SafeAreaProvider>
+  );
+}

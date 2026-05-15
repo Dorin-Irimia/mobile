@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "mobile",
-    "slug": "mobile",
+    "name": "Urbio Auto",
+    "slug": "urbio-auto",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -10,18 +10,55 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#FF6B1A"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "ro.urbio.auto",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Urbio Auto folosește camera pentru a scana documente și fotografii vehicule.",
+        "NSPhotoLibraryUsageDescription": "Urbio Auto accesează galeria pentru a adăuga fotografii.",
+        "NSFaceIDUsageDescription": "Urbio Auto folosește Face ID pentru autentificare rapidă.",
+        "NSLocationWhenInUseUsageDescription": "Urbio Auto folosește locația ta pentru a completa automat adresa la cheltuieli și alimentări."
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#FF6B1A"
       },
-      "edgeToEdgeEnabled": true
+      "package": "ro.urbio.auto",
+      "edgeToEdgeEnabled": false,
+      "permissions": [
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "USE_BIOMETRIC",
+        "USE_FINGERPRINT",
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ]
     },
+    "plugins": [
+      "expo-camera",
+      "expo-image-picker",
+      [
+        "expo-notifications",
+        {
+          "color": "#FF6B1A"
+        }
+      ],
+      "expo-local-authentication",
+      "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Urbio Auto folosește locația pentru a completa adresa la cheltuieli și alimentări."
+        }
+      ]
+    ],
     "web": {
       "favicon": "./assets/favicon.png"
     }
