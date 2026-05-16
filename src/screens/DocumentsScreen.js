@@ -308,7 +308,7 @@ export default function DocumentsScreen({ navigation }) {
               await deleteDocument(doc.id);
               setViewerDoc(null);
             } catch (e) {
-              Alert.alert('Eroare', 'Nu s-a putut șterge.');
+              Alert.alert(e?.offline ? 'Mod offline' : 'Eroare', e?.message || 'Nu s-a putut șterge.');
             }
           },
         },
@@ -346,7 +346,7 @@ export default function DocumentsScreen({ navigation }) {
             try {
               await deleteFolder(folder.id);
             } catch (e) {
-              Alert.alert('Eroare', e?.response?.data?.error || 'Nu s-a putut șterge.');
+              Alert.alert(e?.offline ? 'Mod offline' : 'Eroare', e?.message || e?.response?.data?.error || 'Nu s-a putut șterge.');
             }
           },
         },

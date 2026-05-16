@@ -41,6 +41,7 @@ import {
   normalizeQuickActionIds,
 } from '../utils/quickActions';
 import { sendTestLocalNotification } from '../hooks/usePushNotifications';
+import { showOfflineAlert } from '../utils/onlineGate';
 
 const APP_VERSION = packageJson.version || '1.0.0';
 
@@ -265,6 +266,26 @@ export default function ProfileScreen({ navigation }) {
   const quickActionIds = useStore(s => s.quickActionIds);
   const loadQuickActions = useStore(s => s.loadQuickActions);
   const saveQuickActions = useStore(s => s.saveQuickActions);
+  const appMode = useStore(s => s.appMode);
+  const isOnline = useStore(s => s.isOnline);
+  const households = useStore(s => s.households);
+  const householdExpenses = useStore(s => s.householdExpenses);
+  const householdIncomes = useStore(s => s.householdIncomes);
+  const householdEvents = useStore(s => s.householdEvents);
+  const fetchHouseholds = useStore(s => s.fetchHouseholds);
+  const fetchHouseholdExpenses = useStore(s => s.fetchHouseholdExpenses);
+  const fetchHouseholdIncomes = useStore(s => s.fetchHouseholdIncomes);
+  const fetchHouseholdEvents = useStore(s => s.fetchHouseholdEvents);
+  const isHouseholdMode = appMode === 'household';
+
+  const guardOnline = (label, handler) => () => {
+    if (!isOnline) {
+      showOfflineAlert(`${label} necesită internet`);
+      return;
+    }
+    handler?.();
+  };
+  const offlineDim = !isOnline ? { opacity: 0.55 } : null;
 
   const { isTablet, hPad, maxContentWidth } = useResponsive();
 
@@ -297,17 +318,35 @@ export default function ProfileScreen({ navigation }) {
   const totalKm = (vehicles || []).reduce((s, v) => s + (Number(v.km) || 0), 0);
   const totalSpent = (invoices || []).reduce((s, i) => s + (Number(i.amount) || 0), 0);
   const totalLiters = (fuelLogs || []).reduce((s, f) => s + (Number(f.liters) || 0), 0);
+  const totalHouseholdExpense = (householdExpenses || []).reduce((s, e) => s + (Number(e.amount) || 0), 0);
+  const totalHouseholdIncome = (householdIncomes || []).reduce((s, e) => s + (Number(e.amount) || 0), 0);
+  const householdBalance = totalHouseholdIncome - totalHouseholdExpense;
+  const upcomingEventsCount = (householdEvents || []).filter(e => !e.isDone).length;
   const selectedQuickActions = normalizeQuickActionIds(quickActionIds);
 
   const loadAll = useCallback(async () => {
-    await Promise.all([
-      fetchMe().catch(() => {}),
-      fetchVehicles(),
-      fetchInvoices(),
-      fetchDocuments(),
-      fetchFuelLogs(),
-    ]);
-  }, [fetchMe, fetchVehicles, fetchInvoices, fetchDocuments, fetchFuelLogs]);
+    if (isHouseholdMode) {
+      await Promise.all([
+        fetchMe().catch(() => {}),
+        fetchHouseholds(),
+        fetchHouseholdExpenses(),
+        fetchHouseholdIncomes(),
+        fetchHouseholdEvents(),
+      ]);
+    } else {
+      await Promise.all([
+        fetchMe().catch(() => {}),
+        fetchVehicles(),
+        fetchInvoices(),
+        fetchDocuments(),
+        fetchFuelLogs(),
+      ]);
+    }
+  }, [
+    isHouseholdMode, fetchMe,
+    fetchVehicles, fetchInvoices, fetchDocuments, fetchFuelLogs,
+    fetchHouseholds, fetchHouseholdExpenses, fetchHouseholdIncomes, fetchHouseholdEvents,
+  ]);
 
   useEffect(() => {
     (async () => {
@@ -681,35 +720,66 @@ export default function ProfileScreen({ navigation }) {
             </TouchableOpacity>
           </Card>
 
-          {/* Statistici */}
-          <Card title="Statisticile mele">
-            <View style={styles.statsRow}>
-              <StatCol icon="🚗" label="Vehicule" value={(vehicles || []).length} />
-              <View style={styles.statDivider} />
-              <StatCol icon="📄" label="Documente" value={(documents || []).length} />
-              <View style={styles.statDivider} />
-              <StatCol icon="🧾" label="Facturi" value={(invoices || []).length} />
-            </View>
-            <View style={[styles.statsRow, { marginTop: SPACING.lg, borderTopWidth: 1, borderTopColor: T.line2, paddingTop: SPACING.lg }]}>
-              <StatCol
-                icon="💰"
-                label="Cheltuit"
-                value={formatCurrency(totalSpent, 'RON').replace('RON', '').trim() + ' RON'}
-              />
-              <View style={styles.statDivider} />
-              <StatCol
-                icon="📏"
-                label="KM totali"
-                value={totalKm.toLocaleString('ro-RO')}
-              />
-              <View style={styles.statDivider} />
-              <StatCol
-                icon="⛽"
-                label="Litri"
-                value={totalLiters.toFixed(0)}
-              />
-            </View>
-          </Card>
+          {/* Statistici (mode-aware) */}
+          {isHouseholdMode ? (
+            <Card title="Statistici locuințe">
+              <View style={styles.statsRow}>
+                <StatCol icon="🏠" label="Locuințe" value={(households || []).length} />
+                <View style={styles.statDivider} />
+                <StatCol icon="💸" label="Cheltuieli" value={(householdExpenses || []).length} />
+                <View style={styles.statDivider} />
+                <StatCol icon="💰" label="Venituri" value={(householdIncomes || []).length} />
+              </View>
+              <View style={[styles.statsRow, { marginTop: SPACING.lg, borderTopWidth: 1, borderTopColor: T.line2, paddingTop: SPACING.lg }]}>
+                <StatCol
+                  icon="💸"
+                  label="Cheltuit"
+                  value={formatCurrency(totalHouseholdExpense, 'RON').replace('RON', '').trim() + ' RON'}
+                />
+                <View style={styles.statDivider} />
+                <StatCol
+                  icon="📅"
+                  label="Evenimente"
+                  value={upcomingEventsCount}
+                />
+                <View style={styles.statDivider} />
+                <StatCol
+                  icon={householdBalance >= 0 ? '📈' : '📉'}
+                  label="Balanță"
+                  value={formatCurrency(householdBalance, 'RON').replace('RON', '').trim() + ' RON'}
+                />
+              </View>
+            </Card>
+          ) : (
+            <Card title="Statistici mașini">
+              <View style={styles.statsRow}>
+                <StatCol icon="🚗" label="Vehicule" value={(vehicles || []).length} />
+                <View style={styles.statDivider} />
+                <StatCol icon="📄" label="Documente" value={(documents || []).length} />
+                <View style={styles.statDivider} />
+                <StatCol icon="🧾" label="Facturi" value={(invoices || []).length} />
+              </View>
+              <View style={[styles.statsRow, { marginTop: SPACING.lg, borderTopWidth: 1, borderTopColor: T.line2, paddingTop: SPACING.lg }]}>
+                <StatCol
+                  icon="💰"
+                  label="Cheltuit"
+                  value={formatCurrency(totalSpent, 'RON').replace('RON', '').trim() + ' RON'}
+                />
+                <View style={styles.statDivider} />
+                <StatCol
+                  icon="📏"
+                  label="KM totali"
+                  value={totalKm.toLocaleString('ro-RO')}
+                />
+                <View style={styles.statDivider} />
+                <StatCol
+                  icon="⛽"
+                  label="Litri"
+                  value={totalLiters.toFixed(0)}
+                />
+              </View>
+            </Card>
+          )}
 
           {/* Cont */}
           <Card title="Detalii cont">
@@ -770,54 +840,66 @@ export default function ProfileScreen({ navigation }) {
             />
           </Card>
 
-          {/* Acțiuni rapide */}
-          <Card title="Acțiuni rapide Acasă">
-            <Text style={styles.quickActionLimit}>
-              {selectedQuickActions.length}/{MAX_HOME_QUICK_ACTIONS} active
-            </Text>
-            <View style={styles.quickActionList}>
-              {QUICK_ACTIONS.map(action => {
-                const selected = selectedQuickActions.includes(action.id);
-                const index = selectedQuickActions.indexOf(action.id);
-                return (
-                  <QuickActionOption
-                    key={action.id}
-                    action={action}
-                    selected={selected}
-                    order={index + 1}
-                    canMoveUp={selected && index > 0}
-                    canMoveDown={selected && index >= 0 && index < selectedQuickActions.length - 1}
-                    onToggle={() => toggleQuickAction(action.id)}
-                    onMoveUp={() => moveQuickAction(action.id, -1)}
-                    onMoveDown={() => moveQuickAction(action.id, 1)}
-                  />
-                );
-              })}
-            </View>
-          </Card>
+          {/* Acțiuni rapide — doar pentru modul Mașini */}
+          {!isHouseholdMode && (
+            <Card title="Acțiuni rapide Acasă (mașini)">
+              <Text style={styles.quickActionLimit}>
+                {selectedQuickActions.length}/{MAX_HOME_QUICK_ACTIONS} active
+              </Text>
+              <View style={styles.quickActionList}>
+                {QUICK_ACTIONS.map(action => {
+                  const selected = selectedQuickActions.includes(action.id);
+                  const index = selectedQuickActions.indexOf(action.id);
+                  return (
+                    <QuickActionOption
+                      key={action.id}
+                      action={action}
+                      selected={selected}
+                      order={index + 1}
+                      canMoveUp={selected && index > 0}
+                      canMoveDown={selected && index >= 0 && index < selectedQuickActions.length - 1}
+                      onToggle={() => toggleQuickAction(action.id)}
+                      onMoveUp={() => moveQuickAction(action.id, -1)}
+                      onMoveDown={() => moveQuickAction(action.id, 1)}
+                    />
+                  );
+                })}
+              </View>
+            </Card>
+          )}
 
           {/* Mode switcher */}
           <Card title="Mod aplicație">
             <ModeSwitcher />
           </Card>
 
+          {/* Categorii custom */}
+          <Card title="Categorii custom">
+            <ActionRow
+              icon="🏷"
+              label="Gestionează categoriile"
+              sub="Nume, emoji și culoare pentru cheltuieli și venituri"
+              onPress={() => navigation.navigate('CustomCategories')}
+            />
+          </Card>
+
           {/* Prieteni + share */}
-          <Card title="Familie & prieteni">
+          <Card title="Familie & prieteni" style={offlineDim}>
             <ActionRow
               icon="👥"
-              label="Prieteni"
+              label={!isOnline ? 'Prieteni (necesită internet)' : 'Prieteni'}
               sub="Adaugă persoane cu care poți share-ui mașini sau locuințe"
-              onPress={() => navigation.navigate('Friends')}
+              onPress={guardOnline('Prieteni', () => navigation.navigate('Friends'))}
             />
           </Card>
 
           {/* Securitate */}
-          <Card title="Securitate">
+          <Card title="Securitate" style={offlineDim}>
             <ActionRow
               icon="🔑"
-              label="Schimbă parola"
+              label={!isOnline ? 'Schimbă parola (necesită internet)' : 'Schimbă parola'}
               sub="Recomandat la fiecare 3 luni"
-              onPress={() => setPassModalVisible(true)}
+              onPress={guardOnline('Schimbarea parolei', () => setPassModalVisible(true))}
             />
           </Card>
 
@@ -836,12 +918,12 @@ export default function ProfileScreen({ navigation }) {
           </Card>
 
           {/* Date personale */}
-          <Card title="Datele mele">
+          <Card title="Datele mele" style={offlineDim}>
             <ActionRow
               icon="📤"
-              label="Exportă datele"
+              label={!isOnline ? 'Exportă datele (necesită internet)' : 'Exportă datele'}
               sub="Descarcă tot ca fișier JSON"
-              onPress={handleExportData}
+              onPress={guardOnline('Exportul datelor', handleExportData)}
             />
           </Card>
 
@@ -857,12 +939,14 @@ export default function ProfileScreen({ navigation }) {
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.logoutBtn, styles.deleteAccountBtn]}
-              onPress={() => setDeleteModalVisible(true)}
+              style={[styles.logoutBtn, styles.deleteAccountBtn, !isOnline && { opacity: 0.55 }]}
+              onPress={guardOnline('Ștergerea contului', () => setDeleteModalVisible(true))}
               activeOpacity={0.85}
             >
               <Text style={styles.logoutIcon}>⚠️</Text>
-              <Text style={styles.deleteAccountLabel}>Șterge contul definitiv</Text>
+              <Text style={styles.deleteAccountLabel}>
+                {!isOnline ? 'Șterge cont (online)' : 'Șterge contul definitiv'}
+              </Text>
             </TouchableOpacity>
           </Card>
 

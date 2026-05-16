@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert, KeyboardAvoidingView, ActivityIndicator,
 } from 'react-native';
@@ -7,16 +7,7 @@ import useStore from '../store';
 import { T, RADIUS, FONTS, SHADOW, SPACING, useResponsive, HIT_SLOP, HIT_SLOP_LG, TOUCH_TARGET, IS_IOS } from '../theme';
 import DateField from '../components/DateField';
 import CustomFieldsEditor from '../components/CustomFieldsEditor';
-
-const CATEGORIES = [
-  { key: 'salariu',    label: '💼 Salariu ' },
-  { key: 'chirie',     label: '🏠 Chirie încasată ' },
-  { key: 'freelance',  label: '💻 Freelance ' },
-  { key: 'dividende',  label: '📈 Dividende ' },
-  { key: 'bonusuri',   label: '🎁 Bonusuri ' },
-  { key: 'cadou',      label: '🎀 Cadou ' },
-  { key: 'altele',     label: '💵 Altele ' },
-];
+import { getCategoriesFor } from '../utils/categories';
 
 const RECURRING = [
   { key: 'none', label: '⏸ O dată', icon: '⏸' },
@@ -34,7 +25,18 @@ export default function AddHouseholdIncomeScreen({ navigation, route }) {
   const addHouseholdIncome = useStore(s => s.addHouseholdIncome);
   const updateHouseholdIncome = useStore(s => s.updateHouseholdIncome);
   const selectedHouseholdId = useStore(s => s.selectedHouseholdId);
+  const customCategories = useStore(s => s.customCategories);
+  const loadCustomCategories = useStore(s => s.loadCustomCategories);
   const { isTablet, hPad, maxContentWidth } = useResponsive();
+
+  useEffect(() => { loadCustomCategories(); }, []);
+  const CATEGORIES = useMemo(
+    () => getCategoriesFor('income', customCategories).map(c => ({
+      ...c,
+      label: `${c.icon} ${c.label} `,
+    })),
+    [customCategories],
+  );
 
   const incomeId = route?.params?.incomeId;
   const isEdit = !!incomeId;
@@ -118,6 +120,12 @@ export default function AddHouseholdIncomeScreen({ navigation, route }) {
                   <Text style={[styles.catText, category === c.key && styles.catTextActive]}>{c.label}</Text>
                 </TouchableOpacity>
               ))}
+              <TouchableOpacity
+                onPress={() => navigation.navigate('CustomCategories')}
+                style={[styles.catTile, { borderStyle: 'dashed' }]}
+              >
+                <Text style={[styles.catText, { color: T.brand }]}>+ Categorie nouă</Text>
+              </TouchableOpacity>
             </View>
           </View>
 

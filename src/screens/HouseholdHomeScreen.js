@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
+  Image,
   ScrollView,
   TouchableOpacity,
   StyleSheet,
@@ -9,12 +10,19 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import useStore from '../store';
 import {
   T, RADIUS, SHADOW, FONTS, SPACING,
   formatDate, formatCurrency, daysUntil,
-  useResponsive, HIT_SLOP, TOUCH_TARGET, IS_IOS,
+  useResponsive, HIT_SLOP,
 } from '../theme';
+import { getApiUrl } from '../api/client';
+import { OnlineDot } from '../components/NetworkBadge';
+import ModePill from '../components/ModePill';
+import { MonthlyBarChart, CategoryBreakdown } from '../components/Charts';
+import { getCategoryMeta } from '../utils/categories';
+import { showOfflineAlert } from '../utils/onlineGate';
 
 function getGreeting() {
   const h = new Date().getHours();
@@ -23,8 +31,51 @@ function getGreeting() {
   return 'Bună seara';
 }
 
+function getInitials(name) {
+  return (name || '')
+    .split(' ')
+    .slice(0, 2)
+    .map(w => w[0])
+    .join('')
+    .toUpperCase() || '?';
+}
+
+function ProfilePill({ user, onPress }) {
+  const apiUrl = getApiUrl();
+  const avatarUri = user?.avatar
+    ? (user.avatar.startsWith('http') ? user.avatar : `${apiUrl}${user.avatar}`)
+    : null;
+
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.82}
+      style={styles.profilePill}
+      hitSlop={HIT_SLOP}
+    >
+      <View style={styles.profileAvatar}>
+        {avatarUri ? (
+          <Image source={{ uri: avatarUri }} style={styles.profileAvatarImg} />
+        ) : (
+          <Text style={styles.profileAvatarInitials}>{getInitials(user?.name)}</Text>
+        )}
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={styles.profilePillName} numberOfLines={1}>
+          {user?.name || 'Profil'}
+        </Text>
+        <Text style={styles.profilePillSub} numberOfLines={1}>
+          {user?.email || 'Vezi profilul →'}
+        </Text>
+      </View>
+      <Text style={styles.profilePillChev}>›</Text>
+    </TouchableOpacity>
+  );
+}
+
 export default function HouseholdHomeScreen({ navigation }) {
   const user = useStore(s => s.user);
+  const fetchMe = useStore(s => s.fetchMe);
   const households = useStore(s => s.households);
   const selectedHouseholdId = useStore(s => s.selectedHouseholdId);
   const setSelectedHousehold = useStore(s => s.setSelectedHousehold);
@@ -37,6 +88,17 @@ export default function HouseholdHomeScreen({ navigation }) {
   const fetchHouseholdEvents = useStore(s => s.fetchHouseholdEvents);
   const notifications = useStore(s => s.notifications);
   const fetchNotifications = useStore(s => s.fetchNotifications);
+  const customCategories = useStore(s => s.customCategories);
+  const loadCustomCategories = useStore(s => s.loadCustomCategories);
+  const isOnline = useStore(s => s.isOnline);
+
+  const goOnline = (route, params, label) => () => {
+    if (!isOnline) {
+      showOfflineAlert(`${label} necesită internet`);
+      return;
+    }
+    navigation.navigate(route, params);
+  };
 
   const { isTablet, hPad, maxContentWidth } = useResponsive();
   const [loading, setLoading] = useState(true);
@@ -53,12 +115,19 @@ export default function HouseholdHomeScreen({ navigation }) {
       fetchHouseholdIncomes(),
       fetchHouseholdEvents(),
       fetchNotifications(),
+      loadCustomCategories(),
     ]);
-  }, [fetchHouseholds, fetchHouseholdExpenses, fetchHouseholdIncomes, fetchHouseholdEvents, fetchNotifications]);
+  }, [fetchHouseholds, fetchHouseholdExpenses, fetchHouseholdIncomes, fetchHouseholdEvents, fetchNotifications, loadCustomCategories]);
 
   useEffect(() => {
     (async () => { setLoading(true); await loadAll(); setLoading(false); })();
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchMe().catch(() => {});
+    }, [fetchMe]),
+  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -121,7 +190,13 @@ export default function HouseholdHomeScreen({ navigation }) {
     return (
       <View style={styles.root}>
         <SafeAreaView edges={['top']} style={styles.header}>
-          <Text style={styles.headerGreeting}>{getGreeting()}, {firstName}!</Text>
+          <View style={[styles.headerRow, { paddingHorizontal: hPad }]}>
+            <Text style={[styles.headerGreeting, { flex: 1 }]}>{getGreeting()}, {firstName}!</Text>
+            <OnlineDot />
+          </View>
+          <View style={[styles.modeRow, { paddingHorizontal: hPad }]}>
+            <ModePill />
+          </View>
         </SafeAreaView>
         <View style={styles.emptyWrap}>
           <Text style={styles.emptyIcon}>🏠</Text>
@@ -151,6 +226,7 @@ export default function HouseholdHomeScreen({ navigation }) {
               {new Date().toLocaleDateString('ro-RO', { weekday: 'long', day: 'numeric', month: 'long' })}
             </Text>
           </View>
+          <OnlineDot />
           <TouchableOpacity
             onPress={() => navigation.navigate('Notifications')}
             hitSlop={HIT_SLOP}
@@ -163,6 +239,10 @@ export default function HouseholdHomeScreen({ navigation }) {
               </View>
             )}
           </TouchableOpacity>
+        </View>
+
+        <View style={[styles.modeRow, { paddingHorizontal: hPad }]}>
+          <ModePill />
         </View>
 
         {households.length > 1 && (
@@ -200,6 +280,8 @@ export default function HouseholdHomeScreen({ navigation }) {
         ]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={T.brand} />}
       >
+        <ProfilePill user={user} onPress={() => navigation.navigate('HouseholdProfile')} />
+
         {/* Household card */}
         {selectedHousehold && (
           <TouchableOpacity
@@ -300,14 +382,78 @@ export default function HouseholdHomeScreen({ navigation }) {
             <Text style={styles.actionLabel}>Eveniment</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={styles.actionTile}
-            onPress={() => navigation.navigate('ShareHousehold', { householdId: selectedHouseholdId })}
+            style={[styles.actionTile, !isOnline && styles.actionTileDisabled]}
+            onPress={goOnline('AIChat', undefined, 'Asistentul AI')}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.actionIcon}>🤖</Text>
+            <Text style={styles.actionLabel}>AI</Text>
+            {!isOnline && <Text style={styles.actionLockBadge}>offline</Text>}
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.actionsRow}>
+          <TouchableOpacity
+            style={[styles.actionTile, !isOnline && styles.actionTileDisabled]}
+            onPress={goOnline('ShareHousehold', { householdId: selectedHouseholdId }, 'Partajarea locuinței')}
             activeOpacity={0.85}
           >
             <Text style={styles.actionIcon}>👥</Text>
             <Text style={styles.actionLabel}>Membri</Text>
+            {!isOnline && <Text style={styles.actionLockBadge}>offline</Text>}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.actionTile}
+            onPress={() => navigation.navigate('HouseholdExpenses')}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.actionIcon}>📊</Text>
+            <Text style={styles.actionLabel}>Rapoarte</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.actionTile}
+            onPress={() => navigation.navigate('HouseholdCalendar')}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.actionIcon}>🗓</Text>
+            <Text style={styles.actionLabel}>Calendar</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.actionTile, !isOnline && styles.actionTileDisabled]}
+            onPress={goOnline('Friends', undefined, 'Prieteni')}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.actionIcon}>🧑‍🤝‍🧑</Text>
+            <Text style={styles.actionLabel}>Prieteni</Text>
+            {!isOnline && <Text style={styles.actionLockBadge}>offline</Text>}
           </TouchableOpacity>
         </View>
+
+        {/* Charts: trend + category breakdown */}
+        {(filteredExpenses.length > 0 || filteredIncomes.length > 0) && (
+          <View style={{ gap: SPACING.lg }}>
+            <MonthlyBarChart
+              expenses={filteredExpenses}
+              incomes={filteredIncomes}
+              months={6}
+              currency="RON"
+            />
+            <CategoryBreakdown
+              items={filteredExpenses}
+              currency="RON"
+              title="🥧 Cheltuieli pe categorii"
+              getMeta={(key) => getCategoryMeta(key, 'expense', customCategories)}
+            />
+            {filteredIncomes.length > 0 && (
+              <CategoryBreakdown
+                items={filteredIncomes}
+                currency="RON"
+                title="💰 Venituri pe categorii"
+                getMeta={(key) => getCategoryMeta(key, 'income', customCategories)}
+              />
+            )}
+          </View>
+        )}
 
         {/* Upcoming events */}
         {upcomingEvents.length > 0 && (
@@ -368,9 +514,28 @@ export default function HouseholdHomeScreen({ navigation }) {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: T.bg },
   header: { backgroundColor: T.card, borderBottomWidth: 1, borderBottomColor: T.line },
-  headerRow: { flexDirection: 'row', alignItems: 'center', paddingTop: SPACING.sm, paddingBottom: SPACING.md, gap: SPACING.md },
+  headerRow: { flexDirection: 'row', alignItems: 'center', paddingTop: SPACING.sm, paddingBottom: SPACING.sm, gap: SPACING.md },
+  modeRow: { paddingBottom: SPACING.md },
   headerGreeting: { fontSize: 20, fontWeight: FONTS.bold, color: T.ink },
   headerSub: { fontSize: 12, color: T.ink3, marginTop: 2, textTransform: 'capitalize' },
+
+  profilePill: {
+    flexDirection: 'row', alignItems: 'center', gap: SPACING.md,
+    backgroundColor: T.card, borderRadius: RADIUS.xl,
+    padding: SPACING.md,
+    ...SHADOW.sm,
+  },
+  profileAvatar: {
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: T.brand,
+    alignItems: 'center', justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  profileAvatarImg: { width: 44, height: 44, borderRadius: 22 },
+  profileAvatarInitials: { color: '#fff', fontSize: 16, fontWeight: FONTS.bold },
+  profilePillName: { fontSize: 15, fontWeight: FONTS.bold, color: T.ink },
+  profilePillSub: { fontSize: 11, color: T.ink3, marginTop: 2 },
+  profilePillChev: { fontSize: 28, color: T.ink4 },
   iconBtn: {
     width: 40, height: 40, borderRadius: 20,
     backgroundColor: T.brandTint,
@@ -446,8 +611,18 @@ const styles = StyleSheet.create({
     paddingVertical: SPACING.md,
     ...SHADOW.sm,
   },
+  actionTileDisabled: { opacity: 0.45 },
   actionIcon: { fontSize: 28 },
   actionLabel: { fontSize: 11, fontWeight: FONTS.semibold, color: T.ink2 },
+  actionLockBadge: {
+    fontSize: 9, fontWeight: FONTS.bold, color: '#B91C1C',
+    backgroundColor: '#FEE2E2',
+    paddingHorizontal: 6, paddingVertical: 1,
+    borderRadius: RADIUS.full,
+    overflow: 'hidden',
+    marginTop: 2,
+    letterSpacing: 0.4,
+  },
 
   sectionTitle: {
     fontSize: 14, fontWeight: FONTS.bold, color: T.ink,

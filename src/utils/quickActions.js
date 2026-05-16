@@ -57,6 +57,7 @@ export const QUICK_ACTIONS = [
     label: 'Service',
     description: 'Caută aproape',
     route: 'Services',
+    requiresOnline: true,
   },
   {
     id: 'ai',
@@ -64,6 +65,7 @@ export const QUICK_ACTIONS = [
     label: 'AI',
     description: 'Asistent auto',
     route: 'AIChat',
+    requiresOnline: true,
   },
   {
     id: 'search',
@@ -78,6 +80,7 @@ export const QUICK_ACTIONS = [
     label: 'Prieteni',
     description: 'Acces partajat',
     route: 'Friends',
+    requiresOnline: true,
   },
   {
     id: 'addVehicle',

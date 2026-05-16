@@ -18,32 +18,9 @@ import {
   useResponsive, useSafeBottomPadding, HIT_SLOP, TOUCH_TARGET,
 } from '../theme';
 import { Card, Pill, EmptyState, LoadingView } from '../components/ui';
+import { exportExpenses, pickExpensesFile } from '../utils/expenseIO';
+import { getCategoryMeta, getCategoriesFor } from '../utils/categories';
 
-const CATEGORY_META = {
-  utilitati:  { color: '#3B82F6', bg: '#EFF6FF', icon: '💡', label: 'Utilități' },
-  intretinere:{ color: '#10B981', bg: '#ECFDF5', icon: '🔧', label: 'Întreținere' },
-  mobila:     { color: '#8B5CF6', bg: '#F5F3FF', icon: '🛋', label: 'Mobilă' },
-  reparatii:  { color: '#EF4444', bg: '#FEF2F2', icon: '🛠', label: 'Reparații' },
-  mancare:    { color: '#F59E0B', bg: '#FFFBEB', icon: '🍽', label: 'Mâncare' },
-  curatenie:  { color: '#06B6D4', bg: '#ECFEFF', icon: '🧹', label: 'Curățenie' },
-  rate:       { color: '#A855F7', bg: '#FAF5FF', icon: '💳', label: 'Rate' },
-  abonamente: { color: '#EC4899', bg: '#FDF2F8', icon: '📺', label: 'Abonamente' },
-  altele:     { color: T.ink3, bg: T.line2, icon: '📌', label: 'Altele' },
-};
-
-const CATEGORIES = [
-  { key: 'toate', label: 'Toate ' },
-  { key: 'utilitati', label: '💡 Utilități ' },
-  { key: 'intretinere', label: '🔧 Întreținere ' },
-  { key: 'mobila', label: '🛋 Mobilă ' },
-  { key: 'reparatii', label: '🛠 Reparații ' },
-  { key: 'mancare', label: '🍽 Mâncare ' },
-  { key: 'rate', label: '💳 Rate ' },
-  { key: 'abonamente', label: '📺 Abonamente ' },
-  { key: 'altele', label: '📌 Altele ' },
-];
-
-function getCatMeta(c) { return CATEGORY_META[c] || CATEGORY_META.altele; }
 
 function getMonthKey(dateStr) {
   const d = new Date(dateStr);
@@ -76,7 +53,26 @@ export default function HouseholdExpensesScreen({ navigation }) {
   const fetchHouseholdExpenses = useStore(s => s.fetchHouseholdExpenses);
   const fetchHouseholds = useStore(s => s.fetchHouseholds);
   const deleteHouseholdExpense = useStore(s => s.deleteHouseholdExpense);
+  const importHouseholdExpenses = useStore(s => s.importHouseholdExpenses);
+  const customCategories = useStore(s => s.customCategories);
+  const loadCustomCategories = useStore(s => s.loadCustomCategories);
   const user = useStore(s => s.user);
+  const [ioBusy, setIoBusy] = useState(false);
+
+  useEffect(() => { loadCustomCategories(); }, []);
+
+  const filterCategories = useMemo(
+    () => [
+      { key: 'toate', label: 'Toate ' },
+      ...getCategoriesFor('expense', customCategories).map(c => ({
+        key: c.key,
+        label: `${c.icon} ${c.label} `,
+      })),
+    ],
+    [customCategories],
+  );
+
+  const getCatMeta = (key) => getCategoryMeta(key, 'expense', customCategories);
 
   const { isTablet, hPad, maxContentWidth } = useResponsive();
   const safeBottom = useSafeBottomPadding(28);
@@ -119,6 +115,85 @@ export default function HouseholdExpensesScreen({ navigation }) {
     .filter(e => getMonthKey(e.date) === currentMonthKey)
     .reduce((s, e) => s + Number(e.amount || 0), 0);
 
+  const targetHouseholdName = () => {
+    if (householdFilter === 'all') return 'cheltuieli';
+    return households.find(h => h.id === householdFilter)?.name || 'cheltuieli';
+  };
+
+  const targetImportHouseholdId = () => {
+    if (householdFilter !== 'all') return householdFilter;
+    return selectedHouseholdId || households[0]?.id || null;
+  };
+
+  const promptExport = () => {
+    if (filtered.length === 0) {
+      Alert.alert('Export', 'Nu există cheltuieli de exportat în filtrul curent.');
+      return;
+    }
+    Alert.alert('Exportă cheltuieli', `Filtru curent: ${filtered.length} cheltuieli`, [
+      { text: 'Anulează', style: 'cancel' },
+      {
+        text: 'JSON',
+        onPress: async () => {
+          setIoBusy(true);
+          try {
+            await exportExpenses(filtered, { format: 'json', householdName: targetHouseholdName() });
+          } catch (e) {
+            Alert.alert('Eroare', 'Nu s-a putut exporta.');
+          } finally { setIoBusy(false); }
+        },
+      },
+      {
+        text: 'CSV',
+        onPress: async () => {
+          setIoBusy(true);
+          try {
+            await exportExpenses(filtered, { format: 'csv', householdName: targetHouseholdName() });
+          } catch (e) {
+            Alert.alert('Eroare', 'Nu s-a putut exporta.');
+          } finally { setIoBusy(false); }
+        },
+      },
+    ]);
+  };
+
+  const handleImport = async () => {
+    const targetId = targetImportHouseholdId();
+    if (!targetId) {
+      Alert.alert('Import', 'Adaugă mai întâi o locuință.');
+      return;
+    }
+    setIoBusy(true);
+    try {
+      const picked = await pickExpensesFile();
+      if (!picked) return;
+      const targetName = households.find(h => h.id === targetId)?.name || '';
+      Alert.alert(
+        'Confirmă import',
+        `Vrei să imporți ${picked.items.length} cheltuieli în „${targetName}"?`,
+        [
+          { text: 'Anulează', style: 'cancel' },
+          {
+            text: 'Importă',
+            onPress: async () => {
+              try {
+                const { imported, skipped } = await importHouseholdExpenses(picked.items, targetId);
+                Alert.alert(
+                  'Import finalizat',
+                  `Adăugate: ${imported}${skipped ? ` · Ignorate: ${skipped}` : ''}`,
+                );
+              } catch (e) {
+                Alert.alert('Eroare', e?.message || 'Nu s-a putut importa.');
+              }
+            },
+          },
+        ],
+      );
+    } catch (e) {
+      Alert.alert('Eroare', e?.message || 'Fișier invalid.');
+    } finally { setIoBusy(false); }
+  };
+
   const handleDelete = (item) => {
     Alert.alert('Șterge cheltuiala', `Sigur ștergi "${item.title}"?`, [
       { text: 'Anulează', style: 'cancel' },
@@ -128,7 +203,7 @@ export default function HouseholdExpensesScreen({ navigation }) {
           try {
             await deleteHouseholdExpense(item.id);
           } catch (e) {
-            Alert.alert('Eroare', e?.response?.data?.error || 'Nu s-a putut șterge.');
+            Alert.alert(e?.offline ? 'Mod offline' : 'Eroare', e?.message || e?.response?.data?.error || 'Nu s-a putut șterge.');
           }
         },
       },
@@ -188,6 +263,24 @@ export default function HouseholdExpensesScreen({ navigation }) {
     <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={[styles.header, { paddingHorizontal: hPad }]}>
         <Text style={styles.headerTitle}>Cheltuieli locuință</Text>
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            style={styles.headerBtn}
+            onPress={handleImport}
+            disabled={ioBusy}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.headerBtnText}>📥 Importă</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.headerBtn, styles.headerBtnPrimary]}
+            onPress={promptExport}
+            disabled={ioBusy}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.headerBtnText, styles.headerBtnTextPrimary]}>📤 Exportă</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <SectionList
@@ -239,7 +332,7 @@ export default function HouseholdExpensesScreen({ navigation }) {
 
             {/* Category filter */}
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
-              {CATEGORIES.map(c => (
+              {filterCategories.map(c => (
                 <TouchableOpacity
                   key={c.key}
                   onPress={() => setCatFilter(c.key)}
@@ -277,8 +370,21 @@ export default function HouseholdExpensesScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: T.bg },
-  header: { paddingTop: SPACING.sm, paddingBottom: SPACING.md },
-  headerTitle: { fontSize: 22, fontWeight: FONTS.bold, color: T.ink },
+  header: {
+    paddingTop: SPACING.sm, paddingBottom: SPACING.md,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: SPACING.sm,
+  },
+  headerTitle: { fontSize: 22, fontWeight: FONTS.bold, color: T.ink, flex: 1 },
+  headerActions: { flexDirection: 'row', gap: 6 },
+  headerBtn: {
+    paddingHorizontal: 10, paddingVertical: 7,
+    borderRadius: RADIUS.full,
+    backgroundColor: T.card,
+    borderWidth: 1, borderColor: T.line,
+  },
+  headerBtnPrimary: { backgroundColor: T.brand, borderColor: T.brand },
+  headerBtnText: { fontSize: 12, fontWeight: FONTS.bold, color: T.ink2 },
+  headerBtnTextPrimary: { color: '#fff' },
 
   totalCard: {
     backgroundColor: T.brand,

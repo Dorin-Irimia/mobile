@@ -30,6 +30,8 @@ import {
 } from '../theme';
 import { EmptyState, StatusBadge } from '../components/ui';
 import { OnlineDot } from '../components/NetworkBadge';
+import ModePill from '../components/ModePill';
+import { showOfflineAlert } from '../utils/onlineGate';
 import { VehiclePhotoSticker } from '../components/VehiclePhotoSticker';
 import { getVehicleIcon } from '../utils/vehicleCategories';
 import {
@@ -184,6 +186,7 @@ export default function HomeScreen({ navigation }) {
 
   const selectedVehicleIdGlobal = useStore(s => s.selectedVehicleId);
   const setSelectedVehicleGlobal = useStore(s => s.setSelectedVehicle);
+  const isOnline = useStore(s => s.isOnline);
   const selectedVehicleId = selectedVehicleIdGlobal;
   const setSelectedVehicleId = setSelectedVehicleGlobal;
 
@@ -271,6 +274,10 @@ export default function HomeScreen({ navigation }) {
   };
 
   const runQuickAction = (action) => {
+    if (action.requiresOnline && !isOnline) {
+      showOfflineAlert(`${action.label} necesită internet`);
+      return;
+    }
     if (action.requiresVehicle && !selectedVehicle) {
       Alert.alert('Vehicul', 'Adaugă un vehicul pentru această acțiune.');
       return;
@@ -314,6 +321,10 @@ export default function HomeScreen({ navigation }) {
                 <Text style={styles.iconBtnText}>🔍</Text>
               </TouchableOpacity>
             </View>
+          </View>
+
+          <View style={styles.heroModeRow}>
+            <ModePill tone="dark" />
           </View>
 
           <View style={styles.heroStats}>
@@ -445,7 +456,10 @@ export default function HomeScreen({ navigation }) {
                   key={action.id}
                   action={action}
                   width={quickActionGrid.itemWidth}
-                  disabled={action.requiresVehicle && !selectedVehicle}
+                  disabled={
+                    (action.requiresVehicle && !selectedVehicle) ||
+                    (action.requiresOnline && !isOnline)
+                  }
                   onPress={() => runQuickAction(action)}
                 />
               ))}
@@ -530,10 +544,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 3,
   },
   badgeText: { fontSize: 10, fontWeight: FONTS.bold, color: '#fff' },
+  heroModeRow: {
+    marginTop: SPACING.lg,
+  },
   heroStats: {
     flexDirection: 'row',
     gap: SPACING.sm,
-    marginTop: SPACING.xl,
+    marginTop: SPACING.lg,
   },
   statTile: {
     flex: 1,

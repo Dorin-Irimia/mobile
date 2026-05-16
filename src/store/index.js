@@ -13,6 +13,7 @@ import {
 } from '../utils/storage';
 import { processSyncQueue, pullServerState } from '../utils/syncManager';
 import { DEFAULT_QUICK_ACTION_IDS, normalizeQuickActionIds } from '../utils/quickActions';
+import { OfflineActionError } from '../utils/onlineGate';
 
 const PENDING_REGISTRATION_KEY = 'pendingRegistration';
 
@@ -188,6 +189,29 @@ function documentFromPayload(fields, files, clientId) {
   };
 }
 
+function householdExpenseFromPayload(fields, files, clientId) {
+  return {
+    id: clientId,
+    clientId,
+    householdId: fields.householdId,
+    title: fields.title,
+    amount: parseMaybeNumber(fields.amount) || 0,
+    currency: fields.currency || 'RON',
+    category: fields.category || 'altele',
+    date: fields.date,
+    time: fields.time || null,
+    merchant: fields.merchant || null,
+    location: fields.location || null,
+    notes: fields.notes || null,
+    splitMode: fields.splitMode || 'single',
+    customFields: parseCustomFields(fields.customFields),
+    attachments: optimisticAttachments(files),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    _offline: true,
+  };
+}
+
 const useStore = create((set, get) => ({
   user: null,
   vehicles: [],
@@ -210,6 +234,7 @@ const useStore = create((set, get) => ({
   householdEvents: [],
   householdMembersById: {},
   quickActionIds: DEFAULT_QUICK_ACTION_IDS,
+  customCategories: [],
   isLoading: false,
   isOnline: true,
   isSyncing: false,
@@ -233,16 +258,30 @@ const useStore = create((set, get) => ({
 
   // ── Households ─────────────────────────────────────────────────────────────
   fetchHouseholds: async () => {
+    const { isOnline } = get();
+    if (!isOnline) {
+      const cached = await loadCache('households');
+      if (cached) {
+        const merged = await mergeWithOfflineQueue(cached, get().households, 'households');
+        set({ households: merged });
+        const { selectedHouseholdId } = get();
+        if (!selectedHouseholdId && merged.length > 0) {
+          get().setSelectedHousehold(merged[0].id);
+        }
+        return merged;
+      }
+      return get().households;
+    }
     try {
       const { data } = await api.get('/households');
-      set({ households: data });
-      await saveCache('households', data);
-      // Auto-select first if none selected
+      const merged = await mergeWithOfflineQueue(data, get().households, 'households');
+      set({ households: merged });
+      await saveCache('households', merged);
       const { selectedHouseholdId } = get();
-      if (!selectedHouseholdId && data.length > 0) {
-        get().setSelectedHousehold(data[0].id);
+      if (!selectedHouseholdId && merged.length > 0) {
+        get().setSelectedHousehold(merged[0].id);
       }
-      return data;
+      return merged;
     } catch (e) {
       const cached = await loadCache('households');
       if (cached) set({ households: cached });
@@ -251,14 +290,67 @@ const useStore = create((set, get) => ({
   },
 
   addHousehold: async (payload) => {
+    const { isOnline, user } = get();
     const clientId = createClientId('household');
-    const { data } = await api.post('/households', { ...payload, clientId });
+    const body = { ...payload, clientId };
+
+    if (!isOnline) {
+      const optimistic = {
+        ...payload,
+        id: clientId,
+        clientId,
+        userId: user?.id,
+        isOwner: true,
+        memberCount: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        _offline: true,
+      };
+      set(s => ({ households: [optimistic, ...s.households] }));
+      await saveCache('households', get().households);
+      const { selectedHouseholdId } = get();
+      if (!selectedHouseholdId) get().setSelectedHousehold(clientId);
+      await enqueue({
+        entity: 'households',
+        action: 'create',
+        method: 'POST',
+        endpoint: '/households',
+        payload: body,
+        localId: clientId,
+        clientId,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
+      return optimistic;
+    }
+
+    const { data } = await api.post('/households', body);
     set(s => ({ households: [data, ...s.households] }));
     await saveCache('households', get().households);
     return data;
   },
 
   updateHousehold: async (id, patch) => {
+    const { isOnline } = get();
+    set(s => ({
+      households: s.households.map(h => h.id === id ? { ...h, ...patch, updatedAt: new Date().toISOString() } : h),
+    }));
+    await saveCache('households', get().households);
+
+    if (!isOnline) {
+      await enqueue({
+        entity: 'households',
+        action: 'update',
+        method: 'PUT',
+        endpoint: `/households/${id}`,
+        payload: patch,
+        localId: id,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
+      return get().households.find(h => h.id === id);
+    }
+
     const { data } = await api.put(`/households/${id}`, patch);
     set(s => ({ households: s.households.map(h => h.id === id ? data : h) }));
     await saveCache('households', get().households);
@@ -266,6 +358,7 @@ const useStore = create((set, get) => ({
   },
 
   deleteHousehold: async (id) => {
+    if (!get().isOnline) throw new OfflineActionError();
     await api.delete(`/households/${id}`);
     set(s => ({
       households: s.households.filter(h => h.id !== id),
@@ -298,6 +391,7 @@ const useStore = create((set, get) => ({
   },
 
   removeHouseholdMember: async (householdId, userId) => {
+    if (!get().isOnline) throw new OfflineActionError();
     await api.delete(`/households/${householdId}/members/${userId}`);
     set(s => {
       const existing = s.householdMembersById[householdId];
@@ -316,12 +410,23 @@ const useStore = create((set, get) => ({
 
   // ── Household Expenses ─────────────────────────────────────────────────────
   fetchHouseholdExpenses: async (householdId) => {
+    const { isOnline } = get();
+    if (!isOnline) {
+      const cached = await loadCache('householdExpenses');
+      if (cached) {
+        const merged = await mergeWithOfflineQueue(cached, get().householdExpenses, 'householdExpenses');
+        set({ householdExpenses: merged });
+        return merged;
+      }
+      return get().householdExpenses;
+    }
     try {
       const params = householdId ? { householdId } : {};
       const { data } = await api.get('/household-expenses', { params });
-      set({ householdExpenses: data });
-      await saveCache('householdExpenses', data);
-      return data;
+      const merged = await mergeWithOfflineQueue(data, get().householdExpenses, 'householdExpenses');
+      set({ householdExpenses: merged });
+      await saveCache('householdExpenses', merged);
+      return merged;
     } catch (e) {
       const cached = await loadCache('householdExpenses');
       if (cached) set({ householdExpenses: cached });
@@ -330,8 +435,29 @@ const useStore = create((set, get) => ({
   },
 
   addHouseholdExpense: async (formData) => {
+    const { isOnline } = get();
     const clientId = createClientId('hexp');
     if (formData?.append) formData.append('clientId', clientId);
+    const { fields, files } = payloadSnapshot(formData);
+
+    if (!isOnline) {
+      const optimistic = householdExpenseFromPayload(fields, files, clientId);
+      set(s => ({ householdExpenses: [optimistic, ...s.householdExpenses] }));
+      await saveCache('householdExpenses', get().householdExpenses);
+      await enqueue({
+        entity: 'householdExpenses',
+        action: 'create',
+        method: 'POST',
+        endpoint: '/household-expenses',
+        payload: formData,
+        localId: clientId,
+        clientId,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
+      return optimistic;
+    }
+
     const { data } = await api.post('/household-expenses', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
@@ -341,6 +467,38 @@ const useStore = create((set, get) => ({
   },
 
   updateHouseholdExpense: async (id, formData) => {
+    const { isOnline } = get();
+    const { fields, files } = payloadSnapshot(formData);
+
+    if (!isOnline) {
+      set(s => ({
+        householdExpenses: s.householdExpenses.map(e => {
+          if (e.id !== id) return e;
+          return {
+            ...e,
+            ...fields,
+            amount: fields.amount !== undefined ? parseMaybeNumber(fields.amount) || e.amount : e.amount,
+            customFields: parseCustomFields(fields.customFields, e.customFields),
+            attachments: [...(e.attachments || []), ...optimisticAttachments(files)],
+            updatedAt: new Date().toISOString(),
+            _offline: true,
+          };
+        }),
+      }));
+      await saveCache('householdExpenses', get().householdExpenses);
+      await enqueue({
+        entity: 'householdExpenses',
+        action: 'update',
+        method: 'PUT',
+        endpoint: `/household-expenses/${id}`,
+        payload: formData,
+        localId: id,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
+      return get().householdExpenses.find(e => e.id === id);
+    }
+
     const { data } = await api.put(`/household-expenses/${id}`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
@@ -350,6 +508,7 @@ const useStore = create((set, get) => ({
   },
 
   deleteHouseholdExpense: async (id) => {
+    if (!get().isOnline) throw new OfflineActionError();
     await api.delete(`/household-expenses/${id}`);
     set(s => ({ householdExpenses: s.householdExpenses.filter(e => e.id !== id) }));
     await saveCache('householdExpenses', get().householdExpenses);
@@ -357,12 +516,23 @@ const useStore = create((set, get) => ({
 
   // ── Household Incomes ──────────────────────────────────────────────────────
   fetchHouseholdIncomes: async (householdId) => {
+    const { isOnline } = get();
+    if (!isOnline) {
+      const cached = await loadCache('householdIncomes');
+      if (cached) {
+        const merged = await mergeWithOfflineQueue(cached, get().householdIncomes, 'householdIncomes');
+        set({ householdIncomes: merged });
+        return merged;
+      }
+      return get().householdIncomes;
+    }
     try {
       const params = householdId ? { householdId } : {};
       const { data } = await api.get('/household-incomes', { params });
-      set({ householdIncomes: data });
-      await saveCache('householdIncomes', data);
-      return data;
+      const merged = await mergeWithOfflineQueue(data, get().householdIncomes, 'householdIncomes');
+      set({ householdIncomes: merged });
+      await saveCache('householdIncomes', merged);
+      return merged;
     } catch (e) {
       const cached = await loadCache('householdIncomes');
       if (cached) set({ householdIncomes: cached });
@@ -371,14 +541,64 @@ const useStore = create((set, get) => ({
   },
 
   addHouseholdIncome: async (payload) => {
+    const { isOnline } = get();
     const clientId = createClientId('hinc');
-    const { data } = await api.post('/household-incomes', { ...payload, clientId });
+    const body = { ...payload, clientId };
+
+    if (!isOnline) {
+      const optimistic = {
+        ...payload,
+        id: clientId,
+        clientId,
+        amount: parseMaybeNumber(payload.amount) || 0,
+        currency: payload.currency || 'RON',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        _offline: true,
+      };
+      set(s => ({ householdIncomes: [optimistic, ...s.householdIncomes] }));
+      await saveCache('householdIncomes', get().householdIncomes);
+      await enqueue({
+        entity: 'householdIncomes',
+        action: 'create',
+        method: 'POST',
+        endpoint: '/household-incomes',
+        payload: body,
+        localId: clientId,
+        clientId,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
+      return optimistic;
+    }
+
+    const { data } = await api.post('/household-incomes', body);
     set(s => ({ householdIncomes: [data, ...s.householdIncomes] }));
     await saveCache('householdIncomes', get().householdIncomes);
     return data;
   },
 
   updateHouseholdIncome: async (id, patch) => {
+    const { isOnline } = get();
+    set(s => ({
+      householdIncomes: s.householdIncomes.map(i => i.id === id ? { ...i, ...patch, updatedAt: new Date().toISOString() } : i),
+    }));
+    await saveCache('householdIncomes', get().householdIncomes);
+
+    if (!isOnline) {
+      await enqueue({
+        entity: 'householdIncomes',
+        action: 'update',
+        method: 'PUT',
+        endpoint: `/household-incomes/${id}`,
+        payload: patch,
+        localId: id,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
+      return get().householdIncomes.find(i => i.id === id);
+    }
+
     const { data } = await api.put(`/household-incomes/${id}`, patch);
     set(s => ({ householdIncomes: s.householdIncomes.map(i => i.id === id ? data : i) }));
     await saveCache('householdIncomes', get().householdIncomes);
@@ -386,6 +606,7 @@ const useStore = create((set, get) => ({
   },
 
   deleteHouseholdIncome: async (id) => {
+    if (!get().isOnline) throw new OfflineActionError();
     await api.delete(`/household-incomes/${id}`);
     set(s => ({ householdIncomes: s.householdIncomes.filter(i => i.id !== id) }));
     await saveCache('householdIncomes', get().householdIncomes);
@@ -393,12 +614,23 @@ const useStore = create((set, get) => ({
 
   // ── Household Events ───────────────────────────────────────────────────────
   fetchHouseholdEvents: async (householdId) => {
+    const { isOnline } = get();
+    if (!isOnline) {
+      const cached = await loadCache('householdEvents');
+      if (cached) {
+        const merged = await mergeWithOfflineQueue(cached, get().householdEvents, 'householdEvents');
+        set({ householdEvents: merged });
+        return merged;
+      }
+      return get().householdEvents;
+    }
     try {
       const params = householdId ? { householdId } : {};
       const { data } = await api.get('/household-events', { params });
-      set({ householdEvents: data });
-      await saveCache('householdEvents', data);
-      return data;
+      const merged = await mergeWithOfflineQueue(data, get().householdEvents, 'householdEvents');
+      set({ householdEvents: merged });
+      await saveCache('householdEvents', merged);
+      return merged;
     } catch (e) {
       const cached = await loadCache('householdEvents');
       if (cached) set({ householdEvents: cached });
@@ -407,14 +639,63 @@ const useStore = create((set, get) => ({
   },
 
   addHouseholdEvent: async (payload) => {
+    const { isOnline } = get();
     const clientId = createClientId('hev');
-    const { data } = await api.post('/household-events', { ...payload, clientId });
+    const body = { ...payload, clientId };
+
+    if (!isOnline) {
+      const optimistic = {
+        ...payload,
+        id: clientId,
+        clientId,
+        isDone: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        _offline: true,
+      };
+      set(s => ({ householdEvents: [optimistic, ...s.householdEvents] }));
+      await saveCache('householdEvents', get().householdEvents);
+      await enqueue({
+        entity: 'householdEvents',
+        action: 'create',
+        method: 'POST',
+        endpoint: '/household-events',
+        payload: body,
+        localId: clientId,
+        clientId,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
+      return optimistic;
+    }
+
+    const { data } = await api.post('/household-events', body);
     set(s => ({ householdEvents: [data, ...s.householdEvents] }));
     await saveCache('householdEvents', get().householdEvents);
     return data;
   },
 
   updateHouseholdEvent: async (id, patch) => {
+    const { isOnline } = get();
+    set(s => ({
+      householdEvents: s.householdEvents.map(e => e.id === id ? { ...e, ...patch, updatedAt: new Date().toISOString() } : e),
+    }));
+    await saveCache('householdEvents', get().householdEvents);
+
+    if (!isOnline) {
+      await enqueue({
+        entity: 'householdEvents',
+        action: 'update',
+        method: 'PUT',
+        endpoint: `/household-events/${id}`,
+        payload: patch,
+        localId: id,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
+      return get().householdEvents.find(e => e.id === id);
+    }
+
     const { data } = await api.put(`/household-events/${id}`, patch);
     set(s => ({ householdEvents: s.householdEvents.map(e => e.id === id ? data : e) }));
     await saveCache('householdEvents', get().householdEvents);
@@ -422,6 +703,7 @@ const useStore = create((set, get) => ({
   },
 
   deleteHouseholdEvent: async (id) => {
+    if (!get().isOnline) throw new OfflineActionError();
     await api.delete(`/household-events/${id}`);
     set(s => ({ householdEvents: s.householdEvents.filter(e => e.id !== id) }));
     await saveCache('householdEvents', get().householdEvents);
@@ -445,6 +727,72 @@ const useStore = create((set, get) => ({
     return quickActionIds;
   },
 
+  loadCustomCategories: async () => {
+    const saved = await loadCache('customCategories');
+    const list = Array.isArray(saved) ? saved : [];
+    set({ customCategories: list });
+    return list;
+  },
+
+  saveCustomCategories: async (list) => {
+    const clean = Array.isArray(list) ? list : [];
+    set({ customCategories: clean });
+    await saveCache('customCategories', clean);
+    return clean;
+  },
+
+  addCustomCategory: async (cat) => {
+    const list = [...get().customCategories, cat];
+    set({ customCategories: list });
+    await saveCache('customCategories', list);
+    return list;
+  },
+
+  updateCustomCategory: async (key, patch) => {
+    const list = get().customCategories.map(c => c.key === key ? { ...c, ...patch } : c);
+    set({ customCategories: list });
+    await saveCache('customCategories', list);
+    return list;
+  },
+
+  removeCustomCategory: async (key) => {
+    const list = get().customCategories.filter(c => c.key !== key);
+    set({ customCategories: list });
+    await saveCache('customCategories', list);
+    return list;
+  },
+
+  importHouseholdExpenses: async (items, householdId) => {
+    const arr = Array.isArray(items) ? items : [];
+    let imported = 0;
+    let skipped = 0;
+    for (const raw of arr) {
+      const title = raw.title || raw.name || raw.Title;
+      const amount = Number(raw.amount ?? raw.Amount);
+      const date = raw.date || raw.Date || new Date().toISOString().slice(0, 10);
+      if (!title || !Number.isFinite(amount) || amount <= 0) { skipped++; continue; }
+      const fd = new FormData();
+      fd.append('householdId', String(raw.householdId || householdId || ''));
+      fd.append('title', String(title));
+      fd.append('amount', String(amount));
+      fd.append('currency', String(raw.currency || 'RON'));
+      fd.append('category', String(raw.category || 'altele'));
+      fd.append('date', String(date));
+      if (raw.time) fd.append('time', String(raw.time));
+      if (raw.merchant) fd.append('merchant', String(raw.merchant));
+      if (raw.location) fd.append('location', String(raw.location));
+      if (raw.notes) fd.append('notes', String(raw.notes));
+      fd.append('splitMode', String(raw.splitMode || 'single'));
+      try {
+        await get().addHouseholdExpense(fd);
+        imported++;
+      } catch {
+        skipped++;
+      }
+    }
+    return { imported, skipped };
+  },
+
   applyServerState: async (data) => {
     if (!data) return;
     if (data.user) {
@@ -454,14 +802,20 @@ const useStore = create((set, get) => ({
 
     // Preserve offline-only items still pending in the sync queue.
     const currentState = get();
-    const [mergedInvoices, mergedFuelLogs, mergedReminders, mergedDocuments, mergedVehicles] =
-      await Promise.all([
-        mergeWithOfflineQueue(data.invoices, currentState.invoices, 'invoices'),
-        mergeWithOfflineQueue(data.fuelLogs, currentState.fuelLogs, 'fuel'),
-        mergeWithOfflineQueue(data.reminders, currentState.reminders, 'reminders'),
-        mergeWithOfflineQueue(data.documents, currentState.documents, 'documents'),
-        mergeWithOfflineQueue(data.vehicles, currentState.vehicles, 'vehicles'),
-      ]);
+    const [
+      mergedInvoices, mergedFuelLogs, mergedReminders, mergedDocuments, mergedVehicles,
+      mergedHouseholds, mergedHExpenses, mergedHIncomes, mergedHEvents,
+    ] = await Promise.all([
+      mergeWithOfflineQueue(data.invoices, currentState.invoices, 'invoices'),
+      mergeWithOfflineQueue(data.fuelLogs, currentState.fuelLogs, 'fuel'),
+      mergeWithOfflineQueue(data.reminders, currentState.reminders, 'reminders'),
+      mergeWithOfflineQueue(data.documents, currentState.documents, 'documents'),
+      mergeWithOfflineQueue(data.vehicles, currentState.vehicles, 'vehicles'),
+      mergeWithOfflineQueue(data.households, currentState.households, 'households'),
+      mergeWithOfflineQueue(data.householdExpenses, currentState.householdExpenses, 'householdExpenses'),
+      mergeWithOfflineQueue(data.householdIncomes, currentState.householdIncomes, 'householdIncomes'),
+      mergeWithOfflineQueue(data.householdEvents, currentState.householdEvents, 'householdEvents'),
+    ]);
 
     set({
       user: data.user || get().user,
@@ -472,6 +826,10 @@ const useStore = create((set, get) => ({
       fuelLogs: mergedFuelLogs,
       notifications: data.notifications || [],
       vehicleMembersById: data.vehicleMembersById || get().vehicleMembersById,
+      households: mergedHouseholds,
+      householdExpenses: mergedHExpenses,
+      householdIncomes: mergedHIncomes,
+      householdEvents: mergedHEvents,
     });
     await Promise.all([
       saveCache('vehicles', mergedVehicles),
@@ -481,6 +839,10 @@ const useStore = create((set, get) => ({
       saveCache('fuel', mergedFuelLogs),
       saveCache('notifications', data.notifications || []),
       saveCache('vehicleMembersById', data.vehicleMembersById || {}),
+      saveCache('households', mergedHouseholds),
+      saveCache('householdExpenses', mergedHExpenses),
+      saveCache('householdIncomes', mergedHIncomes),
+      saveCache('householdEvents', mergedHEvents),
     ]);
   },
 
@@ -628,7 +990,7 @@ const useStore = create((set, get) => ({
         // unsynced records can appear "lost" on the next online refresh.
         const [
           vehicles, invoices, fuelLogs, reminders, documents, notifications, members, selectedVehicleId,
-          appMode, households, selectedHouseholdId, hExpenses, hIncomes, hEvents, hMembers,
+          appMode, households, selectedHouseholdId, hExpenses, hIncomes, hEvents, hMembers, customCats,
         ] = await Promise.all([
           loadCache('vehicles'),
           loadCache('invoices'),
@@ -645,6 +1007,7 @@ const useStore = create((set, get) => ({
           loadCache('householdIncomes'),
           loadCache('householdEvents'),
           loadCache('householdMembersById'),
+          loadCache('customCategories'),
         ]);
         set({
           vehicles: vehicles || [],
@@ -662,6 +1025,7 @@ const useStore = create((set, get) => ({
           householdIncomes: hIncomes || [],
           householdEvents: hEvents || [],
           householdMembersById: hMembers || {},
+          customCategories: Array.isArray(customCats) ? customCats : [],
         });
 
         const queue = await getQueue();
@@ -678,6 +1042,8 @@ const useStore = create((set, get) => ({
   },
 
   fetchMe: async () => {
+    const { isOnline } = get();
+    if (!isOnline) return get().user;
     const { data } = await api.get('/auth/me');
     const u = data.user || data;
     await saveAuth('user', u);
@@ -847,34 +1213,7 @@ const useStore = create((set, get) => ({
   },
 
   removeVehicleMember: async (vehicleId, userId) => {
-    const { isOnline } = get();
-    if (!isOnline) {
-      set(s => {
-        const existing = s.vehicleMembersById[vehicleId];
-        if (!existing) return s;
-        return {
-          vehicleMembersById: {
-            ...s.vehicleMembersById,
-            [vehicleId]: {
-              ...existing,
-              members: existing.members.filter(m => m.user.id !== userId),
-            },
-          },
-        };
-      });
-      await saveCache('vehicleMembersById', get().vehicleMembersById);
-      await enqueue({
-        entity: 'vehicleMembers',
-        action: 'delete',
-        method: 'DELETE',
-        endpoint: `/vehicles/${vehicleId}/members/${userId}`,
-        payload: null,
-        localId: vehicleId,
-      });
-      const queue = await getQueue();
-      set({ pendingCount: queue.length });
-      return;
-    }
+    if (!get().isOnline) throw new OfflineActionError();
     await api.delete(`/vehicles/${vehicleId}/members/${userId}`);
     set(s => {
       const existing = s.vehicleMembersById[vehicleId];
@@ -894,24 +1233,7 @@ const useStore = create((set, get) => ({
   leaveVehicle: async (vehicleId) => {
     const me = get().user?.id;
     if (!me) return;
-    const { isOnline } = get();
-    if (!isOnline) {
-      set(s => ({
-        vehicles: s.vehicles.filter(v => v.id !== vehicleId),
-      }));
-      await saveCache('vehicles', get().vehicles);
-      await enqueue({
-        entity: 'vehicleMembers',
-        action: 'delete',
-        method: 'DELETE',
-        endpoint: `/vehicles/${vehicleId}/members/${me}`,
-        payload: null,
-        localId: vehicleId,
-      });
-      const queue = await getQueue();
-      set({ pendingCount: queue.length });
-      return;
-    }
+    if (!get().isOnline) throw new OfflineActionError();
     await api.delete(`/vehicles/${vehicleId}/members/${me}`);
     set(s => ({
       vehicles: s.vehicles.filter(v => v.id !== vehicleId),
@@ -1041,40 +1363,22 @@ const useStore = create((set, get) => ({
   },
 
   deleteVehicle: async (id) => {
-    const { isOnline } = get();
-    set(s => ({ vehicles: s.vehicles.filter(v => v.id !== id) }));
+    if (!get().isOnline) throw new OfflineActionError();
+    await api.delete(`/vehicles/${id}`);
     set(s => ({
+      vehicles: s.vehicles.filter(v => v.id !== id),
       documents: s.documents.filter(d => d.vehicleId !== id),
       invoices: s.invoices.filter(i => i.vehicleId !== id),
       reminders: s.reminders.filter(r => r.vehicleId !== id),
       fuelLogs: s.fuelLogs.filter(f => f.vehicleId !== id),
     }));
-    await saveCache('vehicles', get().vehicles);
     await Promise.all([
+      saveCache('vehicles', get().vehicles),
       saveCache('documents', get().documents),
       saveCache('invoices', get().invoices),
       saveCache('reminders', get().reminders),
       saveCache('fuel', get().fuelLogs),
     ]);
-
-    if (!isOnline) {
-      const removedLocalCreate = await removePendingCreate('vehicles', id);
-      if (!removedLocalCreate) {
-        await enqueue({
-          entity: 'vehicles',
-          action: 'delete',
-          method: 'DELETE',
-          endpoint: `/vehicles/${id}`,
-          payload: null,
-          localId: id,
-        });
-      }
-      const queue = await getQueue();
-      set({ pendingCount: queue.length });
-      return;
-    }
-
-    await api.delete(`/vehicles/${id}`);
   },
 
   setVehicleAvailability: async (vehicleId, payload) => {
@@ -1171,28 +1475,10 @@ const useStore = create((set, get) => ({
   },
 
   deleteDocument: async (id) => {
-    const { isOnline } = get();
+    if (!get().isOnline) throw new OfflineActionError();
+    await api.delete(`/documents/${id}`);
     set(s => ({ documents: s.documents.filter(d => d.id !== id) }));
     await saveCache('documents', get().documents);
-
-    if (!isOnline) {
-      const removedLocalCreate = await removePendingCreate('documents', id);
-      if (!removedLocalCreate) {
-        await enqueue({
-          entity: 'documents',
-          action: 'delete',
-          method: 'DELETE',
-          endpoint: `/documents/${id}`,
-          payload: null,
-          localId: id,
-        });
-      }
-      const queue = await getQueue();
-      set({ pendingCount: queue.length });
-      return;
-    }
-
-    await api.delete(`/documents/${id}`);
   },
 
   updateDocument: async (id, formData) => {
@@ -1382,32 +1668,7 @@ const useStore = create((set, get) => ({
   },
 
   deleteInvoiceAttachment: async (invoiceId, attId) => {
-    const { isOnline } = get();
-    set(s => ({
-      invoices: s.invoices.map(i =>
-        i.id === invoiceId
-          ? { ...i, attachments: (i.attachments || []).filter(a => a.id !== attId) }
-          : i,
-      ),
-    }));
-    await saveCache('invoices', get().invoices);
-
-    if (!isOnline) {
-      if (!String(attId).startsWith('att-')) {
-        await enqueue({
-          entity: 'invoiceAttachments',
-          action: 'delete',
-          method: 'DELETE',
-          endpoint: `/invoices/${invoiceId}/attachments/${attId}`,
-          payload: null,
-          localId: attId,
-        });
-      }
-      const queue = await getQueue();
-      set({ pendingCount: queue.length });
-      return;
-    }
-
+    if (!get().isOnline) throw new OfflineActionError();
     await api.delete(`/invoices/${invoiceId}/attachments/${attId}`);
     set(s => ({
       invoices: s.invoices.map(i =>
@@ -1420,28 +1681,10 @@ const useStore = create((set, get) => ({
   },
 
   deleteInvoice: async (id) => {
-    const { isOnline } = get();
+    if (!get().isOnline) throw new OfflineActionError();
+    await api.delete(`/invoices/${id}`);
     set(s => ({ invoices: s.invoices.filter(i => i.id !== id) }));
     await saveCache('invoices', get().invoices);
-
-    if (!isOnline) {
-      const removedLocalCreate = await removePendingCreate('invoices', id);
-      if (!removedLocalCreate) {
-        await enqueue({
-          entity: 'invoices',
-          action: 'delete',
-          method: 'DELETE',
-          endpoint: `/invoices/${id}`,
-          payload: null,
-          localId: id,
-        });
-      }
-      const queue = await getQueue();
-      set({ pendingCount: queue.length });
-      return;
-    }
-
-    await api.delete(`/invoices/${id}`);
   },
 
   // ── Reminders ───────────────────────────────────────────────────────────────
@@ -1519,28 +1762,10 @@ const useStore = create((set, get) => ({
   },
 
   deleteReminder: async (id) => {
-    const { isOnline } = get();
+    if (!get().isOnline) throw new OfflineActionError();
+    await api.delete(`/reminders/${id}`);
     set(s => ({ reminders: s.reminders.filter(r => r.id !== id) }));
     await saveCache('reminders', get().reminders);
-
-    if (!isOnline) {
-      const removedLocalCreate = await removePendingCreate('reminders', id);
-      if (!removedLocalCreate) {
-        await enqueue({
-          entity: 'reminders',
-          action: 'delete',
-          method: 'DELETE',
-          endpoint: `/reminders/${id}`,
-          payload: null,
-          localId: id,
-        });
-      }
-      const queue = await getQueue();
-      set({ pendingCount: queue.length });
-      return;
-    }
-
-    await api.delete(`/reminders/${id}`);
   },
 
   // ── Fuel ────────────────────────────────────────────────────────────────────
@@ -1650,27 +1875,7 @@ const useStore = create((set, get) => ({
   },
 
   deleteFuelLog: async (id) => {
-    const { isOnline } = get();
-    set(s => ({ fuelLogs: s.fuelLogs.filter(f => f.id !== id) }));
-    await saveCache('fuel', get().fuelLogs);
-
-    if (!isOnline) {
-      const removedLocalCreate = await removePendingCreate('fuelLogs', id);
-      if (!removedLocalCreate) {
-        await enqueue({
-          entity: 'fuelLogs',
-          action: 'delete',
-          method: 'DELETE',
-          endpoint: `/fuel/${id}`,
-          payload: null,
-          localId: id,
-        });
-      }
-      const queue = await getQueue();
-      set({ pendingCount: queue.length });
-      return;
-    }
-
+    if (!get().isOnline) throw new OfflineActionError();
     await api.delete(`/fuel/${id}`);
     set(s => ({ fuelLogs: s.fuelLogs.filter(f => f.id !== id) }));
     await saveCache('fuel', get().fuelLogs);
@@ -1712,32 +1917,7 @@ const useStore = create((set, get) => ({
   },
 
   deleteFuelAttachment: async (fuelId, attId) => {
-    const { isOnline } = get();
-    set(s => ({
-      fuelLogs: s.fuelLogs.map(f =>
-        f.id === fuelId
-          ? { ...f, attachments: (f.attachments || []).filter(a => a.id !== attId) }
-          : f,
-      ),
-    }));
-    await saveCache('fuel', get().fuelLogs);
-
-    if (!isOnline) {
-      if (!String(attId).startsWith('att-')) {
-        await enqueue({
-          entity: 'fuelAttachments',
-          action: 'delete',
-          method: 'DELETE',
-          endpoint: `/fuel/${fuelId}/attachments/${attId}`,
-          payload: null,
-          localId: attId,
-        });
-      }
-      const queue = await getQueue();
-      set({ pendingCount: queue.length });
-      return;
-    }
-
+    if (!get().isOnline) throw new OfflineActionError();
     await api.delete(`/fuel/${fuelId}/attachments/${attId}`);
     set(s => ({
       fuelLogs: s.fuelLogs.map(f =>

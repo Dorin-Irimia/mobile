@@ -63,7 +63,7 @@ export default function FuelLogScreen({ navigation }) {
             await deleteFuelLog(id);
             setDetailLog(null);
           } catch (e) {
-            Alert.alert('Eroare', e?.response?.data?.error || 'Nu s-a putut șterge.');
+            Alert.alert(e?.offline ? 'Mod offline' : 'Eroare', e?.message || e?.response?.data?.error || 'Nu s-a putut șterge.');
           }
         },
       },

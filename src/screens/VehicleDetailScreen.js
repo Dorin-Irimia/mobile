@@ -132,8 +132,8 @@ export default function VehicleDetailScreen({ navigation, route }) {
                   try {
                     await deleteVehicle(vehicleId);
                     navigation.goBack();
-                  } catch {
-                    Alert.alert('Eroare', 'Nu s-a putut șterge vehiculul.');
+                  } catch (e) {
+                    Alert.alert(e?.offline ? 'Mod offline' : 'Eroare', e?.message || 'Nu s-a putut șterge vehiculul.');
                   }
                 },
               },

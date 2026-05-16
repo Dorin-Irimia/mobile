@@ -46,6 +46,7 @@ import AddHouseholdExpenseScreen from '../screens/AddHouseholdExpenseScreen';
 import AddHouseholdIncomeScreen from '../screens/AddHouseholdIncomeScreen';
 import AddHouseholdEventScreen from '../screens/AddHouseholdEventScreen';
 import ShareHouseholdScreen from '../screens/ShareHouseholdScreen';
+import CustomCategoriesScreen from '../screens/CustomCategoriesScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -157,6 +158,7 @@ export default function AppNavigator() {
         <Stack.Screen name="AddHouseholdIncome" component={AddHouseholdIncomeScreen} options={{ presentation: 'modal' }} />
         <Stack.Screen name="AddHouseholdEvent" component={AddHouseholdEventScreen} options={{ presentation: 'modal' }} />
         <Stack.Screen name="ShareHousehold" component={ShareHouseholdScreen} options={{ presentation: 'card' }} />
+        <Stack.Screen name="CustomCategories" component={CustomCategoriesScreen} options={{ presentation: 'modal' }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

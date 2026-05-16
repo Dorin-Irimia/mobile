@@ -22,18 +22,7 @@ import CustomFieldsEditor from '../components/CustomFieldsEditor';
 import LocationField from '../components/LocationField';
 import DateField from '../components/DateField';
 import TimeField from '../components/TimeField';
-
-const CATEGORIES = [
-  { key: 'utilitati',  label: '💡 Utilități ', color: '#3B82F6' },
-  { key: 'intretinere', label: '🔧 Întreținere ', color: '#10B981' },
-  { key: 'mobila',     label: '🛋 Mobilă ', color: '#8B5CF6' },
-  { key: 'reparatii',  label: '🛠 Reparații ', color: '#EF4444' },
-  { key: 'mancare',    label: '🍽 Mâncare ', color: '#F59E0B' },
-  { key: 'curatenie',  label: '🧹 Curățenie ', color: '#06B6D4' },
-  { key: 'rate',       label: '💳 Rate ', color: '#A855F7' },
-  { key: 'abonamente', label: '📺 Abonamente ', color: '#EC4899' },
-  { key: 'altele',     label: '📌 Altele ', color: T.brand },
-];
+import { getCategoriesFor } from '../utils/categories';
 
 const SPLIT_OPTIONS = [
   { key: 'single', label: 'Doar eu', icon: '👤', desc: 'Plată făcută doar de tine' },
@@ -54,7 +43,18 @@ export default function AddHouseholdExpenseScreen({ navigation, route }) {
   const addHouseholdExpense = useStore(s => s.addHouseholdExpense);
   const updateHouseholdExpense = useStore(s => s.updateHouseholdExpense);
   const selectedHouseholdId = useStore(s => s.selectedHouseholdId);
+  const customCategories = useStore(s => s.customCategories);
+  const loadCustomCategories = useStore(s => s.loadCustomCategories);
   const { isTablet, hPad, maxContentWidth } = useResponsive();
+
+  useEffect(() => { loadCustomCategories(); }, []);
+  const CATEGORIES = useMemo(
+    () => getCategoriesFor('expense', customCategories).map(c => ({
+      ...c,
+      label: `${c.icon} ${c.label} `,
+    })),
+    [customCategories],
+  );
 
   const expenseId = route?.params?.expenseId;
   const isEdit = !!expenseId;
@@ -186,6 +186,12 @@ export default function AddHouseholdExpenseScreen({ navigation, route }) {
                   </TouchableOpacity>
                 );
               })}
+              <TouchableOpacity
+                onPress={() => navigation.navigate('CustomCategories')}
+                style={[styles.catTile, { backgroundColor: T.card, borderColor: T.line, borderStyle: 'dashed' }]}
+              >
+                <Text style={[styles.catText, { color: T.brand }]}>+ Categorie nouă</Text>
+              </TouchableOpacity>
             </View>
           </View>
 
