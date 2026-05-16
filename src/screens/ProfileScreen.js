@@ -192,6 +192,57 @@ function QuickActionOption({ action, selected, order, onToggle, onMoveUp, onMove
   );
 }
 
+function ModeSwitcher() {
+  const appMode = useStore(s => s.appMode);
+  const setAppMode = useStore(s => s.setAppMode);
+
+  const options = [
+    { key: 'vehicle', icon: '🚗', label: 'Mașini', desc: 'Vehicule, documente, scadențe, facturi' },
+    { key: 'household', icon: '🏠', label: 'Casă', desc: 'Cheltuieli, venituri, evenimente locuință' },
+  ];
+
+  return (
+    <View style={{ gap: 8 }}>
+      {options.map(opt => {
+        const active = appMode === opt.key;
+        return (
+          <TouchableOpacity
+            key={opt.key}
+            onPress={() => setAppMode(opt.key)}
+            activeOpacity={0.85}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: SPACING.md,
+              padding: SPACING.md,
+              borderRadius: RADIUS.md,
+              backgroundColor: active ? T.brandTint : T.bgSoft,
+              borderWidth: 1.5,
+              borderColor: active ? T.brand : T.line,
+            }}
+          >
+            <Text style={{ fontSize: 28 }}>{opt.icon}</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 15, fontWeight: FONTS.bold, color: active ? T.brand : T.ink }}>
+                {opt.label}
+              </Text>
+              <Text style={{ fontSize: 11, color: T.ink3, marginTop: 2 }}>{opt.desc}</Text>
+            </View>
+            <View style={{
+              width: 22, height: 22, borderRadius: 11,
+              borderWidth: 2,
+              borderColor: active ? T.brand : T.line,
+              alignItems: 'center', justifyContent: 'center',
+            }}>
+              {active && <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: T.brand }} />}
+            </View>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+}
+
 export default function ProfileScreen({ navigation }) {
   const user = useStore(s => s.user);
   const vehicles = useStore(s => s.vehicles);
@@ -745,12 +796,17 @@ export default function ProfileScreen({ navigation }) {
             </View>
           </Card>
 
+          {/* Mode switcher */}
+          <Card title="Mod aplicație">
+            <ModeSwitcher />
+          </Card>
+
           {/* Prieteni + share */}
           <Card title="Familie & prieteni">
             <ActionRow
               icon="👥"
               label="Prieteni"
-              sub="Adaugă persoane cu care poți share-ui mașini"
+              sub="Adaugă persoane cu care poți share-ui mașini sau locuințe"
               onPress={() => navigation.navigate('Friends')}
             />
           </Card>

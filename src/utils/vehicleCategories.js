@@ -3,10 +3,10 @@ export const VEHICLE_CATEGORIES = [
   { key: 'motocicleta', label: 'Motocicletă', icon: '🏍️' },
   { key: 'camion',      label: 'Camion',      icon: '🚛' },
   { key: 'tractor',     label: 'Tractor',     icon: '🚜' },
-  { key: 'microbuz',    label: 'Microbuz',    icon: '🚐' },
   { key: 'autobuz',     label: 'Autobuz',     icon: '🚌' },
-  { key: 'avion',       label: 'Avion',       icon: '✈️' },
   { key: 'barca',       label: 'Barcă',       icon: '⛵' },
+  { key: 'bicicleta',   label: 'Bicicletă',   icon: '🚲' },
+  { key: 'remorca',      label: 'Remorcă',     icon: '🚚' },
 ];
 
 export function getVehicleIcon(category) {

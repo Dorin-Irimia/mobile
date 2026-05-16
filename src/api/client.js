@@ -1,7 +1,7 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
 
-export const DEFAULT_API_URL = 'http://192.168.1.145:3001';
+export const DEFAULT_API_URL = 'http://192.168.1.145:3002';
 const API_URL_KEY = 'api_server_url';
 
 let _apiUrl = DEFAULT_API_URL;

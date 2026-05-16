@@ -39,6 +39,16 @@
         "android.permission.VIBRATE",
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.VIBRATE",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.RECORD_AUDIO"
       ]
     },
@@ -76,6 +86,12 @@
         "projectId": "0063a3aa-7f75-4a48-80cb-8f3fb3ae4b45"
       }
     },
-    "owner": "dirimia436"
+    "owner": "dirimia436",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/0063a3aa-7f75-4a48-80cb-8f3fb3ae4b45"
+    }
   }
 }

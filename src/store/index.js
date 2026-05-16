@@ -202,6 +202,13 @@ const useStore = create((set, get) => ({
   vehicleMembersById: {},
   folders: [],
   selectedVehicleId: null,
+  appMode: null, // null | 'vehicle' | 'household'
+  households: [],
+  selectedHouseholdId: null,
+  householdExpenses: [],
+  householdIncomes: [],
+  householdEvents: [],
+  householdMembersById: {},
   quickActionIds: DEFAULT_QUICK_ACTION_IDS,
   isLoading: false,
   isOnline: true,
@@ -212,6 +219,212 @@ const useStore = create((set, get) => ({
   setSelectedVehicle: (id) => {
     set({ selectedVehicleId: id || null });
     saveCache('selectedVehicleId', id || null).catch(() => {});
+  },
+
+  setAppMode: (mode) => {
+    set({ appMode: mode || null });
+    saveCache('appMode', mode || null).catch(() => {});
+  },
+
+  setSelectedHousehold: (id) => {
+    set({ selectedHouseholdId: id || null });
+    saveCache('selectedHouseholdId', id || null).catch(() => {});
+  },
+
+  // ── Households ─────────────────────────────────────────────────────────────
+  fetchHouseholds: async () => {
+    try {
+      const { data } = await api.get('/households');
+      set({ households: data });
+      await saveCache('households', data);
+      // Auto-select first if none selected
+      const { selectedHouseholdId } = get();
+      if (!selectedHouseholdId && data.length > 0) {
+        get().setSelectedHousehold(data[0].id);
+      }
+      return data;
+    } catch (e) {
+      const cached = await loadCache('households');
+      if (cached) set({ households: cached });
+      return cached || [];
+    }
+  },
+
+  addHousehold: async (payload) => {
+    const clientId = createClientId('household');
+    const { data } = await api.post('/households', { ...payload, clientId });
+    set(s => ({ households: [data, ...s.households] }));
+    await saveCache('households', get().households);
+    return data;
+  },
+
+  updateHousehold: async (id, patch) => {
+    const { data } = await api.put(`/households/${id}`, patch);
+    set(s => ({ households: s.households.map(h => h.id === id ? data : h) }));
+    await saveCache('households', get().households);
+    return data;
+  },
+
+  deleteHousehold: async (id) => {
+    await api.delete(`/households/${id}`);
+    set(s => ({
+      households: s.households.filter(h => h.id !== id),
+      selectedHouseholdId: s.selectedHouseholdId === id ? null : s.selectedHouseholdId,
+    }));
+    await saveCache('households', get().households);
+  },
+
+  fetchHouseholdMembers: async (householdId) => {
+    const { data } = await api.get(`/households/${householdId}/members`);
+    set(s => ({
+      householdMembersById: { ...s.householdMembersById, [householdId]: data },
+    }));
+    return data;
+  },
+
+  addHouseholdMember: async (householdId, payload) => {
+    const { data } = await api.post(`/households/${householdId}/members`, payload);
+    set(s => {
+      const existing = s.householdMembersById[householdId];
+      if (!existing) return s;
+      return {
+        householdMembersById: {
+          ...s.householdMembersById,
+          [householdId]: { ...existing, members: [...existing.members, data] },
+        },
+      };
+    });
+    return data;
+  },
+
+  removeHouseholdMember: async (householdId, userId) => {
+    await api.delete(`/households/${householdId}/members/${userId}`);
+    set(s => {
+      const existing = s.householdMembersById[householdId];
+      if (!existing) return s;
+      return {
+        householdMembersById: {
+          ...s.householdMembersById,
+          [householdId]: {
+            ...existing,
+            members: existing.members.filter(m => m.user.id !== userId),
+          },
+        },
+      };
+    });
+  },
+
+  // ── Household Expenses ─────────────────────────────────────────────────────
+  fetchHouseholdExpenses: async (householdId) => {
+    try {
+      const params = householdId ? { householdId } : {};
+      const { data } = await api.get('/household-expenses', { params });
+      set({ householdExpenses: data });
+      await saveCache('householdExpenses', data);
+      return data;
+    } catch (e) {
+      const cached = await loadCache('householdExpenses');
+      if (cached) set({ householdExpenses: cached });
+      return cached || [];
+    }
+  },
+
+  addHouseholdExpense: async (formData) => {
+    const clientId = createClientId('hexp');
+    if (formData?.append) formData.append('clientId', clientId);
+    const { data } = await api.post('/household-expenses', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    set(s => ({ householdExpenses: [data, ...s.householdExpenses] }));
+    await saveCache('householdExpenses', get().householdExpenses);
+    return data;
+  },
+
+  updateHouseholdExpense: async (id, formData) => {
+    const { data } = await api.put(`/household-expenses/${id}`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    set(s => ({ householdExpenses: s.householdExpenses.map(e => e.id === id ? data : e) }));
+    await saveCache('householdExpenses', get().householdExpenses);
+    return data;
+  },
+
+  deleteHouseholdExpense: async (id) => {
+    await api.delete(`/household-expenses/${id}`);
+    set(s => ({ householdExpenses: s.householdExpenses.filter(e => e.id !== id) }));
+    await saveCache('householdExpenses', get().householdExpenses);
+  },
+
+  // ── Household Incomes ──────────────────────────────────────────────────────
+  fetchHouseholdIncomes: async (householdId) => {
+    try {
+      const params = householdId ? { householdId } : {};
+      const { data } = await api.get('/household-incomes', { params });
+      set({ householdIncomes: data });
+      await saveCache('householdIncomes', data);
+      return data;
+    } catch (e) {
+      const cached = await loadCache('householdIncomes');
+      if (cached) set({ householdIncomes: cached });
+      return cached || [];
+    }
+  },
+
+  addHouseholdIncome: async (payload) => {
+    const clientId = createClientId('hinc');
+    const { data } = await api.post('/household-incomes', { ...payload, clientId });
+    set(s => ({ householdIncomes: [data, ...s.householdIncomes] }));
+    await saveCache('householdIncomes', get().householdIncomes);
+    return data;
+  },
+
+  updateHouseholdIncome: async (id, patch) => {
+    const { data } = await api.put(`/household-incomes/${id}`, patch);
+    set(s => ({ householdIncomes: s.householdIncomes.map(i => i.id === id ? data : i) }));
+    await saveCache('householdIncomes', get().householdIncomes);
+    return data;
+  },
+
+  deleteHouseholdIncome: async (id) => {
+    await api.delete(`/household-incomes/${id}`);
+    set(s => ({ householdIncomes: s.householdIncomes.filter(i => i.id !== id) }));
+    await saveCache('householdIncomes', get().householdIncomes);
+  },
+
+  // ── Household Events ───────────────────────────────────────────────────────
+  fetchHouseholdEvents: async (householdId) => {
+    try {
+      const params = householdId ? { householdId } : {};
+      const { data } = await api.get('/household-events', { params });
+      set({ householdEvents: data });
+      await saveCache('householdEvents', data);
+      return data;
+    } catch (e) {
+      const cached = await loadCache('householdEvents');
+      if (cached) set({ householdEvents: cached });
+      return cached || [];
+    }
+  },
+
+  addHouseholdEvent: async (payload) => {
+    const clientId = createClientId('hev');
+    const { data } = await api.post('/household-events', { ...payload, clientId });
+    set(s => ({ householdEvents: [data, ...s.householdEvents] }));
+    await saveCache('householdEvents', get().householdEvents);
+    return data;
+  },
+
+  updateHouseholdEvent: async (id, patch) => {
+    const { data } = await api.put(`/household-events/${id}`, patch);
+    set(s => ({ householdEvents: s.householdEvents.map(e => e.id === id ? data : e) }));
+    await saveCache('householdEvents', get().householdEvents);
+    return data;
+  },
+
+  deleteHouseholdEvent: async (id) => {
+    await api.delete(`/household-events/${id}`);
+    set(s => ({ householdEvents: s.householdEvents.filter(e => e.id !== id) }));
+    await saveCache('householdEvents', get().householdEvents);
   },
 
   setOnline: (isOnline) => set({ isOnline }),
@@ -413,7 +626,10 @@ const useStore = create((set, get) => ({
         // Load cached data immediately so offline-only items are visible
         // until fetch/sync runs. Otherwise the UI starts empty and any
         // unsynced records can appear "lost" on the next online refresh.
-        const [vehicles, invoices, fuelLogs, reminders, documents, notifications, members, selectedVehicleId] = await Promise.all([
+        const [
+          vehicles, invoices, fuelLogs, reminders, documents, notifications, members, selectedVehicleId,
+          appMode, households, selectedHouseholdId, hExpenses, hIncomes, hEvents, hMembers,
+        ] = await Promise.all([
           loadCache('vehicles'),
           loadCache('invoices'),
           loadCache('fuel'),
@@ -422,6 +638,13 @@ const useStore = create((set, get) => ({
           loadCache('notifications'),
           loadCache('vehicleMembersById'),
           loadCache('selectedVehicleId'),
+          loadCache('appMode'),
+          loadCache('households'),
+          loadCache('selectedHouseholdId'),
+          loadCache('householdExpenses'),
+          loadCache('householdIncomes'),
+          loadCache('householdEvents'),
+          loadCache('householdMembersById'),
         ]);
         set({
           vehicles: vehicles || [],
@@ -432,6 +655,13 @@ const useStore = create((set, get) => ({
           notifications: notifications || [],
           vehicleMembersById: members || {},
           selectedVehicleId: selectedVehicleId || null,
+          appMode: appMode || null,
+          households: households || [],
+          selectedHouseholdId: selectedHouseholdId || null,
+          householdExpenses: hExpenses || [],
+          householdIncomes: hIncomes || [],
+          householdEvents: hEvents || [],
+          householdMembersById: hMembers || {},
         });
 
         const queue = await getQueue();
