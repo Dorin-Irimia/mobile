@@ -5,6 +5,7 @@ import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import api from '../api/client';
 import useStore from '../store';
+import { scheduleVehicleDeadlines } from '../utils/deadlineNotifications';
 
 // Handler pentru ce se întâmplă când o notificare ajunge:
 // - Banner pe ecran (chiar dacă app e deschis)
@@ -34,6 +35,7 @@ export function usePushNotifications(navigationRef) {
     setupNotificationChannel();
     registerToken();
     checkReminders();
+    rescheduleAllVehicleDeadlines();
 
     // Refresh notifications list when one arrives in foreground
     notifListener.current = Notifications.addNotificationReceivedListener(() => {
@@ -147,6 +149,23 @@ async function checkReminders() {
     await api.post('/notifications/check-reminders');
   } catch {
     // Silently ignore — offline or server down
+  }
+}
+
+// Re-arm local deadline notifications on app start so that ITP/RCA/CASCO/Rov
+// alerts survive reboots and reinstalls. Stale ones are replaced because each
+// (vehicleId, field) pair uses a stable key.
+async function rescheduleAllVehicleDeadlines() {
+  try {
+    const vehicles = useStore.getState().vehicles || [];
+    for (const v of vehicles) {
+      if (!v?.id) continue;
+      if (v.itpDate || v.rcaDate || v.cascoDate || v.rovDate) {
+        await scheduleVehicleDeadlines(v);
+      }
+    }
+  } catch {
+    // Ignore — best effort.
   }
 }
 

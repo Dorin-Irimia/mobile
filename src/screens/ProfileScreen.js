@@ -276,7 +276,13 @@ export default function ProfileScreen({ navigation }) {
   const fetchHouseholdExpenses = useStore(s => s.fetchHouseholdExpenses);
   const fetchHouseholdIncomes = useStore(s => s.fetchHouseholdIncomes);
   const fetchHouseholdEvents = useStore(s => s.fetchHouseholdEvents);
+  const monthStartDay = useStore(s => s.monthStartDay);
+  const setMonthStartDay = useStore(s => s.setMonthStartDay);
+  const loadMonthStartDay = useStore(s => s.loadMonthStartDay);
   const isHouseholdMode = appMode === 'household';
+
+  useEffect(() => { loadMonthStartDay(); }, [loadMonthStartDay]);
+  const [monthStartModalOpen, setMonthStartModalOpen] = useState(false);
 
   const guardOnline = (label, handler) => () => {
     if (!isOnline) {
@@ -873,6 +879,16 @@ export default function ProfileScreen({ navigation }) {
             <ModeSwitcher />
           </Card>
 
+          {/* Luna fiscală — start day */}
+          <Card title="Luna fiscală">
+            <ActionRow
+              icon="🗓"
+              label={`Începe pe ziua ${monthStartDay}`}
+              sub="Folosit pentru balanțe lunare, grafice și rapoarte"
+              onPress={() => setMonthStartModalOpen(true)}
+            />
+          </Card>
+
           {/* Categorii custom */}
           <Card title="Categorii custom">
             <ActionRow
@@ -953,6 +969,47 @@ export default function ProfileScreen({ navigation }) {
           <View style={styles.bottomSpacer} />
         </ScrollView>
       )}
+
+      {/* Modal: ziua de început a lunii fiscale */}
+      <Modal
+        visible={monthStartModalOpen}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setMonthStartModalOpen(false)}
+      >
+        <SafeAreaView style={styles.modalSafe}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Începutul lunii fiscale</Text>
+            <TouchableOpacity onPress={() => setMonthStartModalOpen(false)} hitSlop={HIT_SLOP}>
+              <Text style={styles.modalClose}>✕</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView contentContainerStyle={styles.modalContent}>
+            <Text style={styles.modalIntro}>
+              Alege ziua din calendar pe care vrei să înceapă luna fiscală.
+              Toate balanțele, graficele și rapoartele vor folosi acest interval.
+              Pentru a evita săriri în lunile scurte (februarie), valoarea este limitată la 28.
+            </Text>
+            <View style={styles.daysGrid}>
+              {Array.from({ length: 28 }, (_, i) => i + 1).map(d => {
+                const active = d === monthStartDay;
+                return (
+                  <TouchableOpacity
+                    key={d}
+                    onPress={async () => {
+                      await setMonthStartDay(d);
+                      setMonthStartModalOpen(false);
+                    }}
+                    style={[styles.dayTile, active && styles.dayTileActive]}
+                  >
+                    <Text style={[styles.dayTileText, active && styles.dayTileTextActive]}>{d}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
 
       {/* Modal: schimbă parola */}
       <Modal
@@ -1371,6 +1428,21 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.lg,
     lineHeight: 18,
   },
+  daysGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  dayTile: {
+    width: 50, height: 50,
+    borderRadius: 12,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: T.card,
+    borderWidth: 1.5, borderColor: T.line,
+  },
+  dayTileActive: { backgroundColor: T.brand, borderColor: T.brand },
+  dayTileText: { fontSize: 15, fontWeight: FONTS.bold, color: T.ink2 },
+  dayTileTextActive: { color: '#fff' },
   passFieldWrap: {
     flexDirection: 'row',
     alignItems: 'center',

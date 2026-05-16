@@ -8,6 +8,8 @@ import { T, RADIUS, FONTS, SHADOW, SPACING, useResponsive, HIT_SLOP, HIT_SLOP_LG
 import DateField from '../components/DateField';
 import TimeField from '../components/TimeField';
 import LocationField from '../components/LocationField';
+import { promptAddToDeviceCalendar } from '../utils/deviceCalendar';
+import { scheduleDeadlineNotifications } from '../utils/deadlineNotifications';
 
 const TYPES = [
   { key: 'curierat',    label: '📦 Curierat ',    color: '#F59E0B' },
@@ -65,8 +67,34 @@ export default function AddHouseholdEventScreen({ navigation, route }) {
         notes: notes.trim() || null,
         reminderMinutes: reminderMinutes ? parseInt(reminderMinutes) : null,
       };
-      if (isEdit) await updateHouseholdEvent(eventId, payload);
-      else await addHouseholdEvent(payload);
+      const saved = isEdit
+        ? await updateHouseholdEvent(eventId, payload)
+        : await addHouseholdEvent(payload);
+
+      const evId = saved?.id || saved?.clientId || eventId || `${Date.now()}`;
+      scheduleDeadlineNotifications({
+        key: `householdEvent:${evId}`,
+        title: `📅 ${title.trim()}`,
+        body: location.trim() || title.trim(),
+        date: startDate,
+        time: startTime || '09:00',
+        data: { relatedType: 'HouseholdEvent', relatedId: evId },
+      }).catch(() => {});
+
+      await promptAddToDeviceCalendar({
+        title: title.trim(),
+        notes: notes.trim() || undefined,
+        location: location.trim() || undefined,
+        startDate,
+        endDate: endDate || startDate,
+        startTime: startTime || undefined,
+        endTime: endTime || undefined,
+        allDay: !startTime,
+        alarmsMinutesBefore: reminderMinutes
+          ? [parseInt(reminderMinutes), 60 * 24 * 3, 60 * 24 * 7]
+          : [60 * 24 * 7, 60 * 24 * 3, 60 * 24],
+      }, { message: 'Adăugăm evenimentul și în calendarul telefonului?' });
+
       navigation.goBack();
     } catch (e) {
       Alert.alert('Eroare', e?.response?.data?.error || 'Nu s-a putut salva.');

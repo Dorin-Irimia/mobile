@@ -1,6 +1,10 @@
 import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { T, RADIUS, FONTS, SPACING, SHADOW, formatCurrency } from '../theme';
+import {
+  shiftBillingMonth,
+  endOfBillingMonth,
+} from '../utils/monthRange';
 
 const ROW_HEIGHT = 120;
 const BAR_WIDTH = 14;
@@ -17,6 +21,16 @@ function monthLabel(key) {
   return d.toLocaleDateString('ro-RO', { month: 'short' }).replace('.', '');
 }
 
+function lastNBillingBuckets(n, startDay = 1, anchor = new Date()) {
+  const out = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const start = shiftBillingMonth(anchor, startDay, -i);
+    const end = endOfBillingMonth(start, startDay);
+    out.push({ key: monthKey(start), start, end });
+  }
+  return out;
+}
+
 function lastNMonthKeys(n) {
   const now = new Date();
   const keys = [];
@@ -27,24 +41,33 @@ function lastNMonthKeys(n) {
   return keys;
 }
 
-// Paired bar chart: income vs expense per month over the last N months.
-export function MonthlyBarChart({ expenses = [], incomes = [], months = 6, currency = 'RON' }) {
-  const keys = useMemo(() => lastNMonthKeys(months), [months]);
+// Paired bar chart: income vs expense per billing month over the last N months.
+export function MonthlyBarChart({
+  expenses = [], incomes = [], months = 6, currency = 'RON',
+  startDay = 1, anchor,
+}) {
+  const buckets = useMemo(
+    () => lastNBillingBuckets(months, startDay, anchor || new Date()),
+    [months, startDay, anchor],
+  );
 
   const data = useMemo(() => {
-    const expMap = {};
-    const incMap = {};
-    keys.forEach(k => { expMap[k] = 0; incMap[k] = 0; });
+    const series = buckets.map(b => ({ ...b, expense: 0, income: 0 }));
+    const place = (raw, key) => {
+      const d = raw ? new Date(raw) : null;
+      if (!d || isNaN(d)) return null;
+      return series.find(b => d >= b.start && d < b.end);
+    };
     expenses.forEach(e => {
-      const k = monthKey(e.date || e.createdAt);
-      if (k in expMap) expMap[k] += Number(e.amount || 0);
+      const bucket = place(e.date || e.createdAt);
+      if (bucket) bucket.expense += Number(e.amount || 0);
     });
     incomes.forEach(i => {
-      const k = monthKey(i.date || i.createdAt);
-      if (k in incMap) incMap[k] += Number(i.amount || 0);
+      const bucket = place(i.date || i.createdAt);
+      if (bucket) bucket.income += Number(i.amount || 0);
     });
-    return keys.map(k => ({ key: k, expense: expMap[k], income: incMap[k] }));
-  }, [keys, expenses, incomes]);
+    return series;
+  }, [buckets, expenses, incomes]);
 
   const max = useMemo(() => Math.max(1, ...data.map(d => Math.max(d.expense, d.income))), [data]);
   const totalExp = data.reduce((s, d) => s + d.expense, 0);

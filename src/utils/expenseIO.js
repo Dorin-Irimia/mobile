@@ -2,9 +2,14 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
 
-const CSV_COLUMNS = [
+const EXPENSE_COLUMNS = [
   'householdId', 'title', 'amount', 'currency', 'category',
   'date', 'time', 'merchant', 'location', 'notes', 'splitMode',
+];
+
+const INCOME_COLUMNS = [
+  'householdId', 'title', 'amount', 'currency', 'category',
+  'date', 'source', 'recurring', 'notes',
 ];
 
 function csvEscape(value) {
@@ -14,10 +19,10 @@ function csvEscape(value) {
   return s;
 }
 
-export function expensesToCsv(items) {
-  const header = CSV_COLUMNS.join(',');
+function toCsv(items, columns) {
+  const header = columns.join(',');
   const rows = items.map(it =>
-    CSV_COLUMNS.map(c => csvEscape(it[c])).join(','),
+    columns.map(c => csvEscape(it[c])).join(','),
   );
   return [header, ...rows].join('\n');
 }
@@ -48,7 +53,7 @@ function parseCsvLine(line) {
   return out;
 }
 
-export function csvToExpenses(text) {
+function csvToObjects(text) {
   const lines = String(text).replace(/\r\n/g, '\n').split('\n').filter(l => l.trim());
   if (lines.length === 0) return [];
   const header = parseCsvLine(lines[0]).map(h => h.trim());
@@ -64,28 +69,43 @@ export function csvToExpenses(text) {
   });
 }
 
-export async function exportExpenses(items, { format = 'json', householdName = '' } = {}) {
+// Public expense API (kept for backwards compatibility).
+export function expensesToCsv(items) { return toCsv(items, EXPENSE_COLUMNS); }
+export function csvToExpenses(text) { return csvToObjects(text); }
+
+// Generic export for either expenses or incomes.
+export async function exportTransactions(
+  items,
+  { format = 'json', householdName = '', kind = 'expense' } = {},
+) {
   const stamp = new Date().toISOString().slice(0, 10);
-  const slug = householdName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'cheltuieli';
+  const slug = householdName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
+    || (kind === 'income' ? 'venituri' : 'cheltuieli');
   const filename = `${slug}-${stamp}.${format === 'csv' ? 'csv' : 'json'}`;
   const fileUri = `${FileSystem.cacheDirectory}${filename}`;
 
+  const columns = kind === 'income' ? INCOME_COLUMNS : EXPENSE_COLUMNS;
   const body = format === 'csv'
-    ? expensesToCsv(items)
-    : JSON.stringify({ exportedAt: new Date().toISOString(), count: items.length, items }, null, 2);
+    ? toCsv(items, columns)
+    : JSON.stringify({ exportedAt: new Date().toISOString(), kind, count: items.length, items }, null, 2);
 
   await FileSystem.writeAsStringAsync(fileUri, body, { encoding: FileSystem.EncodingType.UTF8 });
 
   if (await Sharing.isAvailableAsync()) {
     await Sharing.shareAsync(fileUri, {
       mimeType: format === 'csv' ? 'text/csv' : 'application/json',
-      dialogTitle: `Exportă cheltuieli (${format.toUpperCase()})`,
+      dialogTitle: `Exportă ${kind === 'income' ? 'venituri' : 'cheltuieli'} (${format.toUpperCase()})`,
     });
   }
   return fileUri;
 }
 
-export async function pickExpensesFile() {
+// Backwards-compatible wrapper.
+export async function exportExpenses(items, opts = {}) {
+  return exportTransactions(items, { ...opts, kind: 'expense' });
+}
+
+export async function pickTransactionsFile() {
   const result = await DocumentPicker.getDocumentAsync({
     type: ['application/json', 'text/csv', 'text/comma-separated-values', '*/*'],
     copyToCacheDirectory: true,
@@ -97,10 +117,15 @@ export async function pickExpensesFile() {
   const name = (asset.name || '').toLowerCase();
   let items;
   if (name.endsWith('.csv') || /^\s*\w[\w\s]*,/.test(content)) {
-    items = csvToExpenses(content);
+    items = csvToObjects(content);
   } else {
     const parsed = JSON.parse(content);
-    items = Array.isArray(parsed) ? parsed : (parsed.items || parsed.expenses || []);
+    items = Array.isArray(parsed) ? parsed : (parsed.items || parsed.expenses || parsed.incomes || []);
   }
   return { items, fileName: asset.name };
+}
+
+// Backwards-compatible wrapper.
+export async function pickExpensesFile() {
+  return pickTransactionsFile();
 }

@@ -20,6 +20,14 @@ import {
 import { Card, Pill, EmptyState, LoadingView } from '../components/ui';
 import { exportExpenses, pickExpensesFile } from '../utils/expenseIO';
 import { getCategoryMeta, getCategoriesFor } from '../utils/categories';
+import MonthPicker from '../components/MonthPicker';
+import { CategoryBreakdown } from '../components/Charts';
+import {
+  startOfBillingMonth,
+  isInBillingMonth,
+  billingMonthLabel,
+  billingMonthKey,
+} from '../utils/monthRange';
 
 
 function getMonthKey(dateStr) {
@@ -56,10 +64,14 @@ export default function HouseholdExpensesScreen({ navigation }) {
   const importHouseholdExpenses = useStore(s => s.importHouseholdExpenses);
   const customCategories = useStore(s => s.customCategories);
   const loadCustomCategories = useStore(s => s.loadCustomCategories);
+  const monthStartDay = useStore(s => s.monthStartDay);
+  const loadMonthStartDay = useStore(s => s.loadMonthStartDay);
   const user = useStore(s => s.user);
   const [ioBusy, setIoBusy] = useState(false);
+  const [monthAnchor, setMonthAnchor] = useState(() => startOfBillingMonth(new Date(), monthStartDay));
+  const [scope, setScope] = useState('month'); // 'month' | 'all'
 
-  useEffect(() => { loadCustomCategories(); }, []);
+  useEffect(() => { loadCustomCategories(); loadMonthStartDay(); }, []);
 
   const filterCategories = useMemo(
     () => [
@@ -100,7 +112,7 @@ export default function HouseholdExpensesScreen({ navigation }) {
     setRefreshing(false);
   }, [load]);
 
-  const filtered = useMemo(() => {
+  const baseFiltered = useMemo(() => {
     return expenses.filter(e => {
       const byHh = householdFilter === 'all' || e.householdId === householdFilter;
       const byCat = catFilter === 'toate' || (e.category || 'altele') === catFilter;
@@ -108,12 +120,15 @@ export default function HouseholdExpensesScreen({ navigation }) {
     });
   }, [expenses, householdFilter, catFilter]);
 
+  const filtered = useMemo(() => {
+    if (scope !== 'month') return baseFiltered;
+    return baseFiltered.filter(e => isInBillingMonth(e.date, monthAnchor, monthStartDay));
+  }, [baseFiltered, scope, monthAnchor, monthStartDay]);
+
   const sections = useMemo(() => groupByMonth(filtered), [filtered]);
 
-  const currentMonthKey = getMonthKey(new Date().toISOString().slice(0, 10));
-  const currentMonthTotal = filtered
-    .filter(e => getMonthKey(e.date) === currentMonthKey)
-    .reduce((s, e) => s + Number(e.amount || 0), 0);
+  const periodLabel = billingMonthLabel(monthAnchor, monthStartDay);
+  const periodTotal = filtered.reduce((s, e) => s + Number(e.amount || 0), 0);
 
   const targetHouseholdName = () => {
     if (householdFilter === 'all') return 'cheltuieli';
@@ -301,11 +316,52 @@ export default function HouseholdExpensesScreen({ navigation }) {
         ]}
         ListHeaderComponent={
           <View style={{ gap: SPACING.md, paddingTop: SPACING.lg, paddingBottom: SPACING.md }}>
-            {/* Total month */}
+            {/* Period total + scope */}
             <View style={styles.totalCard}>
-              <Text style={styles.totalLabel}>Luna curentă</Text>
-              <Text style={styles.totalValue}>{formatCurrency(currentMonthTotal, 'RON')}</Text>
+              <Text style={styles.totalLabel}>
+                {scope === 'month' ? periodLabel : 'Total filtrat'}
+              </Text>
+              <Text style={styles.totalValue}>{formatCurrency(periodTotal, 'RON')}</Text>
+              <Text style={styles.totalSub}>
+                {filtered.length} {filtered.length === 1 ? 'cheltuială' : 'cheltuieli'}
+              </Text>
             </View>
+
+            {/* Month navigator */}
+            <MonthPicker
+              value={monthAnchor}
+              onChange={(d) => { setMonthAnchor(d); setScope('month'); }}
+            />
+
+            {/* Scope toggle */}
+            <View style={styles.scopeRow}>
+              <TouchableOpacity
+                onPress={() => setScope('month')}
+                style={[styles.scopeChip, scope === 'month' && styles.scopeChipActive]}
+              >
+                <Text style={[styles.scopeChipText, scope === 'month' && styles.scopeChipTextActive]}>
+                  📅 Luna selectată
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setScope('all')}
+                style={[styles.scopeChip, scope === 'all' && styles.scopeChipActive]}
+              >
+                <Text style={[styles.scopeChipText, scope === 'all' && styles.scopeChipTextActive]}>
+                  📚 Toate lunile
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Period chart */}
+            {scope === 'month' && filtered.length > 0 && (
+              <CategoryBreakdown
+                items={filtered}
+                currency="RON"
+                title={`🥧 Distribuție · ${periodLabel}`}
+                getMeta={(k) => getCatMeta(k)}
+              />
+            )}
 
             {/* Household filter */}
             {households.length > 1 && (
@@ -392,8 +448,21 @@ const styles = StyleSheet.create({
     padding: SPACING.lg,
     ...SHADOW.md,
   },
-  totalLabel: { color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: FONTS.semibold, letterSpacing: 1 },
+  totalLabel: { color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: FONTS.semibold, letterSpacing: 1, textTransform: 'capitalize' },
   totalValue: { color: '#fff', fontSize: 28, fontWeight: FONTS.bold, marginTop: 4 },
+  totalSub: { color: 'rgba(255,255,255,0.75)', fontSize: 11, marginTop: 4, fontWeight: FONTS.semibold },
+
+  scopeRow: { flexDirection: 'row', gap: 8 },
+  scopeChip: {
+    flex: 1, alignItems: 'center',
+    paddingVertical: 9,
+    borderRadius: RADIUS.full,
+    backgroundColor: T.card,
+    borderWidth: 1.5, borderColor: T.line,
+  },
+  scopeChipActive: { backgroundColor: T.brand, borderColor: T.brand },
+  scopeChipText: { fontSize: 12, fontWeight: FONTS.bold, color: T.ink2 },
+  scopeChipTextActive: { color: '#fff' },
 
   chip: {
     paddingHorizontal: 12, paddingVertical: 7,

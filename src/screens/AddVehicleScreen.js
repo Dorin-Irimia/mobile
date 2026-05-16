@@ -16,6 +16,8 @@ import { Card, PrimaryButton, SectionHeader } from '../components/ui';
 import { VEHICLE_CATEGORIES } from '../utils/vehicleCategories';
 import { VehiclePhotoSticker } from '../components/VehiclePhotoSticker';
 import DateField from '../components/DateField';
+import { promptAddToDeviceCalendar } from '../utils/deviceCalendar';
+import { scheduleVehicleDeadlines } from '../utils/deadlineNotifications';
 
 // ─── Constante ────────────────────────────────────────────────────────────────
 const FUEL_TYPES = ['Benzină', 'Motorină', 'Hibrid', 'Electric', 'GPL', 'GNC'];
@@ -153,7 +155,7 @@ export default function AddVehicleScreen({ navigation, route }) {
 
     setLoading(true);
     try {
-      await addVehicle({
+      const saved = await addVehicle({
         plate: form.plate.trim().toUpperCase(),
         brand: form.brand.trim(),
         model: form.model.trim(),
@@ -172,6 +174,44 @@ export default function AddVehicleScreen({ navigation, route }) {
         purchaseDate: form.purchaseDate || undefined,
         purchaseKm: form.purchaseKm ? parseInt(form.purchaseKm) : undefined,
       });
+
+      // Schedule 7/3/1-day notifications for every deadline that was set.
+      scheduleVehicleDeadlines({
+        id: saved?.id || saved?.clientId,
+        plate: form.plate.trim().toUpperCase(),
+        brand: form.brand.trim(),
+        itpDate: form.itpDate,
+        rcaDate: form.rcaDate,
+        cascoDate: form.cascoDate,
+        rovDate: form.rovDate,
+      }).catch(() => {});
+
+      // Offer to add each deadline to the phone calendar.
+      const plate = form.plate.trim().toUpperCase();
+      const deadlines = [
+        { name: 'ITP', date: form.itpDate },
+        { name: 'RCA', date: form.rcaDate },
+        { name: 'CASCO', date: form.cascoDate },
+        { name: 'Rovinietă', date: form.rovDate },
+      ].filter(d => d.date);
+
+      if (deadlines.length > 0) {
+        await promptAddToDeviceCalendar({
+          title: deadlines.length === 1
+            ? `Expiră ${deadlines[0].name} · ${plate}`
+            : `Termene vehicul · ${plate}`,
+          notes: deadlines.map(d => `${d.name}: ${d.date}`).join('\n'),
+          startDate: deadlines[0].date,
+          endDate: deadlines[0].date,
+          allDay: true,
+          alarmsMinutesBefore: [60 * 24 * 7, 60 * 24 * 3, 60 * 24],
+        }, {
+          message: deadlines.length === 1
+            ? `Adăugăm scadența ${deadlines[0].name} în calendarul telefonului?`
+            : 'Adăugăm prima scadență în calendarul telefonului? (celelalte rămân doar în aplicație)',
+        });
+      }
+
       navigation.goBack();
     } catch (e) {
       const msg = e.response?.data?.error || 'Nu s-a putut adăuga vehiculul. Încearcă din nou.';

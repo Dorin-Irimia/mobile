@@ -85,7 +85,7 @@ function VehicleTabs() {
   return (
     <Tab.Navigator screenOptions={{ headerShown: false, tabBarStyle, tabBarShowLabel: false }}>
       <Tab.Screen name="Home" component={HomeScreen}
-        options={{ tabBarIcon: ({ focused }) => <TabIcon emoji="🏠" label="Acasă" focused={focused} size={iconSize} labelSize={labelSize} /> }} />
+        options={{ tabBarIcon: ({ focused }) => <TabIcon emoji="🚘" label="Garaj" focused={focused} size={iconSize} labelSize={labelSize} /> }} />
       <Tab.Screen name="Documents" component={DocumentsScreen}
         options={{ tabBarIcon: ({ focused }) => <TabIcon emoji="📁" label="Documente" focused={focused} size={iconSize} labelSize={labelSize} /> }} />
       <Tab.Screen name="Calendar" component={CalendarScreen}

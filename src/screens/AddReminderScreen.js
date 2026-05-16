@@ -28,6 +28,8 @@ import {
   IS_IOS,
 } from '../theme';
 import DateField from '../components/DateField';
+import { promptAddToDeviceCalendar } from '../utils/deviceCalendar';
+import { scheduleDeadlineNotifications } from '../utils/deadlineNotifications';
 
 // Categorii cu culori și iconițe (sync cu CalendarScreen)
 const REMINDER_TYPES = [
@@ -109,7 +111,7 @@ export default function AddReminderScreen({ navigation, route }) {
     }
     setSaving(true);
     try {
-      await addReminder({
+      const saved = await addReminder({
         title: title.trim(),
         dueDate,
         type: typeKey,
@@ -117,6 +119,27 @@ export default function AddReminderScreen({ navigation, route }) {
         repeat,
         notes: notes.trim() || undefined,
       });
+
+      const reminderId = saved?.id || saved?.clientId || `${Date.now()}`;
+      // Schedule local notifications at 7 / 3 / 1 days before the due date.
+      scheduleDeadlineNotifications({
+        key: `reminder:${reminderId}`,
+        title: `⏰ ${title.trim()}`,
+        body: selectedVehicle ? `${selectedVehicle.plate || selectedVehicle.brand || ''}`.trim() || title.trim() : title.trim(),
+        date: dueDate,
+        data: { relatedType: 'Reminder', relatedId: reminderId },
+      }).catch(() => {});
+
+      // Offer to also add to the phone calendar.
+      await promptAddToDeviceCalendar({
+        title: title.trim(),
+        notes: notes.trim() || undefined,
+        startDate: dueDate,
+        endDate: dueDate,
+        allDay: true,
+        alarmsMinutesBefore: [60 * 24 * 7, 60 * 24 * 3, 60 * 24],
+      }, { message: 'Adăugăm reminderul și în calendarul telefonului?' });
+
       navigation.goBack();
     } catch {
       Alert.alert('Eroare', 'Nu s-a putut salva reminderul.');

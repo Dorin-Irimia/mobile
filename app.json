@@ -19,7 +19,9 @@
         "NSCameraUsageDescription": "Urbio Auto folosește camera pentru a scana documente și fotografii vehicule.",
         "NSPhotoLibraryUsageDescription": "Urbio Auto accesează galeria pentru a adăuga fotografii.",
         "NSFaceIDUsageDescription": "Urbio Auto folosește Face ID pentru autentificare rapidă.",
-        "NSLocationWhenInUseUsageDescription": "Urbio Auto folosește locația ta pentru a completa automat adresa la cheltuieli și alimentări."
+        "NSLocationWhenInUseUsageDescription": "Urbio Auto folosește locația ta pentru a completa automat adresa la cheltuieli și alimentări.",
+        "NSCalendarsUsageDescription": "Urbio Auto adaugă scadențele ITP/RCA și reminderele în calendarul telefonului ca să nu le ratezi.",
+        "NSCalendarsFullAccessUsageDescription": "Urbio Auto are nevoie de acces la calendar pentru a salva termenele și reminderele."
       }
     },
     "android": {
@@ -40,6 +42,8 @@
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.RECORD_AUDIO",
+        "android.permission.READ_CALENDAR",
+        "android.permission.WRITE_CALENDAR",
         "android.permission.CAMERA",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
@@ -55,6 +59,12 @@
     "plugins": [
       "expo-camera",
       "expo-image-picker",
+      [
+        "expo-calendar",
+        {
+          "calendarPermission": "Urbio Auto folosește calendarul pentru a salva scadențele ITP/RCA și reminderele tale."
+        }
+      ],
       [
         "expo-notifications",
         {

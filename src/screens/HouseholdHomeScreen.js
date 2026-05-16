@@ -23,6 +23,12 @@ import ModePill from '../components/ModePill';
 import { MonthlyBarChart, CategoryBreakdown } from '../components/Charts';
 import { getCategoryMeta } from '../utils/categories';
 import { showOfflineAlert } from '../utils/onlineGate';
+import MonthPicker from '../components/MonthPicker';
+import {
+  startOfBillingMonth,
+  isInBillingMonth,
+  billingMonthLabel,
+} from '../utils/monthRange';
 
 function getGreeting() {
   const h = new Date().getHours();
@@ -91,6 +97,10 @@ export default function HouseholdHomeScreen({ navigation }) {
   const customCategories = useStore(s => s.customCategories);
   const loadCustomCategories = useStore(s => s.loadCustomCategories);
   const isOnline = useStore(s => s.isOnline);
+  const monthStartDay = useStore(s => s.monthStartDay);
+  const loadMonthStartDay = useStore(s => s.loadMonthStartDay);
+
+  const [monthAnchor, setMonthAnchor] = useState(() => startOfBillingMonth(new Date(), monthStartDay));
 
   const goOnline = (route, params, label) => () => {
     if (!isOnline) {
@@ -116,8 +126,9 @@ export default function HouseholdHomeScreen({ navigation }) {
       fetchHouseholdEvents(),
       fetchNotifications(),
       loadCustomCategories(),
+      loadMonthStartDay(),
     ]);
-  }, [fetchHouseholds, fetchHouseholdExpenses, fetchHouseholdIncomes, fetchHouseholdEvents, fetchNotifications, loadCustomCategories]);
+  }, [fetchHouseholds, fetchHouseholdExpenses, fetchHouseholdIncomes, fetchHouseholdEvents, fetchNotifications, loadCustomCategories, loadMonthStartDay]);
 
   useEffect(() => {
     (async () => { setLoading(true); await loadAll(); setLoading(false); })();
@@ -135,13 +146,7 @@ export default function HouseholdHomeScreen({ navigation }) {
     setRefreshing(false);
   }, [loadAll]);
 
-  // Stats for selected household, current month
-  const now = new Date();
-  const inCurrentMonth = (dateStr) => {
-    const d = new Date(dateStr);
-    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-  };
-
+  // Stats for selected household, selected billing month
   const filteredExpenses = useMemo(() => {
     if (!selectedHousehold) return [];
     return householdExpenses.filter(e => e.householdId === selectedHousehold.id);
@@ -158,17 +163,18 @@ export default function HouseholdHomeScreen({ navigation }) {
   }, [householdEvents, selectedHousehold]);
 
   const monthExpenses = filteredExpenses
-    .filter(e => inCurrentMonth(e.date))
+    .filter(e => isInBillingMonth(e.date, monthAnchor, monthStartDay))
     .reduce((s, e) => s + Number(e.amount || 0), 0);
 
   const monthIncomes = filteredIncomes
-    .filter(i => inCurrentMonth(i.date))
+    .filter(i => isInBillingMonth(i.date, monthAnchor, monthStartDay))
     .reduce((s, i) => s + Number(i.amount || 0), 0);
 
   const balance = monthIncomes - monthExpenses;
   const budgetUsed = selectedHousehold?.monthlyBudget
     ? (monthExpenses / selectedHousehold.monthlyBudget) * 100
     : null;
+  const periodLabel = billingMonthLabel(monthAnchor, monthStartDay);
 
   const upcomingEvents = filteredEvents
     .filter(e => {
@@ -317,9 +323,12 @@ export default function HouseholdHomeScreen({ navigation }) {
           </TouchableOpacity>
         )}
 
+        {/* Month picker */}
+        <MonthPicker value={monthAnchor} onChange={setMonthAnchor} />
+
         {/* Balance card */}
         <View style={[styles.balanceCard, balance >= 0 ? styles.balancePositive : styles.balanceNegative]}>
-          <Text style={styles.balanceLabel}>Balanță lunară</Text>
+          <Text style={styles.balanceLabel}>Balanță · {periodLabel}</Text>
           <Text style={styles.balanceValue}>
             {balance >= 0 ? '+' : ''}{formatCurrency(balance, 'RON')}
           </Text>
@@ -437,18 +446,22 @@ export default function HouseholdHomeScreen({ navigation }) {
               incomes={filteredIncomes}
               months={6}
               currency="RON"
+              startDay={monthStartDay}
+              anchor={monthAnchor}
             />
             <CategoryBreakdown
-              items={filteredExpenses}
+              items={filteredExpenses.filter(e => isInBillingMonth(e.date, monthAnchor, monthStartDay))}
               currency="RON"
-              title="🥧 Cheltuieli pe categorii"
+              title={`🥧 Cheltuieli · ${periodLabel}`}
+              emptyHint={`Fără cheltuieli pentru ${periodLabel}.`}
               getMeta={(key) => getCategoryMeta(key, 'expense', customCategories)}
             />
             {filteredIncomes.length > 0 && (
               <CategoryBreakdown
-                items={filteredIncomes}
+                items={filteredIncomes.filter(i => isInBillingMonth(i.date, monthAnchor, monthStartDay))}
                 currency="RON"
-                title="💰 Venituri pe categorii"
+                title={`💰 Venituri · ${periodLabel}`}
+                emptyHint={`Fără venituri pentru ${periodLabel}.`}
                 getMeta={(key) => getCategoryMeta(key, 'income', customCategories)}
               />
             )}

@@ -14,6 +14,7 @@ import {
 import { processSyncQueue, pullServerState } from '../utils/syncManager';
 import { DEFAULT_QUICK_ACTION_IDS, normalizeQuickActionIds } from '../utils/quickActions';
 import { OfflineActionError } from '../utils/onlineGate';
+import { cancelDeadlineNotifications } from '../utils/deadlineNotifications';
 
 const PENDING_REGISTRATION_KEY = 'pendingRegistration';
 
@@ -235,6 +236,7 @@ const useStore = create((set, get) => ({
   householdMembersById: {},
   quickActionIds: DEFAULT_QUICK_ACTION_IDS,
   customCategories: [],
+  monthStartDay: 1, // 1..28 (calendar day on which a billing month begins)
   isLoading: false,
   isOnline: true,
   isSyncing: false,
@@ -707,6 +709,7 @@ const useStore = create((set, get) => ({
     await api.delete(`/household-events/${id}`);
     set(s => ({ householdEvents: s.householdEvents.filter(e => e.id !== id) }));
     await saveCache('householdEvents', get().householdEvents);
+    cancelDeadlineNotifications(`householdEvent:${id}`).catch(() => {});
   },
 
   setOnline: (isOnline) => set({ isOnline }),
@@ -760,6 +763,50 @@ const useStore = create((set, get) => ({
     set({ customCategories: list });
     await saveCache('customCategories', list);
     return list;
+  },
+
+  loadMonthStartDay: async () => {
+    const saved = await loadCache('monthStartDay');
+    const day = Math.min(28, Math.max(1, Number(saved) || 1));
+    set({ monthStartDay: day });
+    return day;
+  },
+
+  setMonthStartDay: async (day) => {
+    const clean = Math.min(28, Math.max(1, Number(day) || 1));
+    set({ monthStartDay: clean });
+    await saveCache('monthStartDay', clean);
+    return clean;
+  },
+
+  importHouseholdIncomes: async (items, householdId) => {
+    const arr = Array.isArray(items) ? items : [];
+    let imported = 0;
+    let skipped = 0;
+    for (const raw of arr) {
+      const title = raw.title || raw.name || raw.Title;
+      const amount = Number(raw.amount ?? raw.Amount);
+      const date = raw.date || raw.Date || new Date().toISOString().slice(0, 10);
+      if (!title || !Number.isFinite(amount) || amount <= 0) { skipped++; continue; }
+      const payload = {
+        householdId: raw.householdId || householdId,
+        title: String(title),
+        amount,
+        currency: String(raw.currency || 'RON'),
+        category: String(raw.category || 'altele'),
+        date: String(date),
+        source: raw.source ? String(raw.source) : null,
+        recurring: raw.recurring ? String(raw.recurring) : 'none',
+        notes: raw.notes ? String(raw.notes) : null,
+      };
+      try {
+        await get().addHouseholdIncome(payload);
+        imported++;
+      } catch {
+        skipped++;
+      }
+    }
+    return { imported, skipped };
   },
 
   importHouseholdExpenses: async (items, householdId) => {
@@ -1009,6 +1056,7 @@ const useStore = create((set, get) => ({
           loadCache('householdMembersById'),
           loadCache('customCategories'),
         ]);
+        const savedMonthStart = await loadCache('monthStartDay');
         set({
           vehicles: vehicles || [],
           invoices: invoices || [],
@@ -1026,6 +1074,7 @@ const useStore = create((set, get) => ({
           householdEvents: hEvents || [],
           householdMembersById: hMembers || {},
           customCategories: Array.isArray(customCats) ? customCats : [],
+          monthStartDay: Math.min(28, Math.max(1, Number(savedMonthStart) || 1)),
         });
 
         const queue = await getQueue();
@@ -1379,6 +1428,12 @@ const useStore = create((set, get) => ({
       saveCache('reminders', get().reminders),
       saveCache('fuel', get().fuelLogs),
     ]);
+    Promise.all([
+      cancelDeadlineNotifications(`vehicle:${id}:itpDate`),
+      cancelDeadlineNotifications(`vehicle:${id}:rcaDate`),
+      cancelDeadlineNotifications(`vehicle:${id}:cascoDate`),
+      cancelDeadlineNotifications(`vehicle:${id}:rovDate`),
+    ]).catch(() => {});
   },
 
   setVehicleAvailability: async (vehicleId, payload) => {
@@ -1766,6 +1821,7 @@ const useStore = create((set, get) => ({
     await api.delete(`/reminders/${id}`);
     set(s => ({ reminders: s.reminders.filter(r => r.id !== id) }));
     await saveCache('reminders', get().reminders);
+    cancelDeadlineNotifications(`reminder:${id}`).catch(() => {});
   },
 
   // ── Fuel ────────────────────────────────────────────────────────────────────

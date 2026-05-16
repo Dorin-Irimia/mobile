@@ -16,6 +16,8 @@ import { Card, PrimaryButton, SectionHeader, LoadingView } from '../components/u
 import { VEHICLE_CATEGORIES } from '../utils/vehicleCategories';
 import { VehiclePhotoSticker } from '../components/VehiclePhotoSticker';
 import DateField from '../components/DateField';
+import { promptAddToDeviceCalendar } from '../utils/deviceCalendar';
+import { scheduleVehicleDeadlines } from '../utils/deadlineNotifications';
 
 // ─── Constante ────────────────────────────────────────────────────────────────
 const FUEL_TYPES = ['Benzină', 'Motorină', 'Hibrid', 'Electric', 'GPL', 'GNC'];
@@ -177,6 +179,12 @@ export default function EditVehicleScreen({ navigation, route }) {
 
     setLoading(true);
     try {
+      const prev = {
+        itpDate: vehicle?.itpDate || '',
+        rcaDate: vehicle?.rcaDate || '',
+        cascoDate: vehicle?.cascoDate || '',
+        rovDate: vehicle?.rovDate || '',
+      };
       await updateVehicle(vehicleId, {
         plate: form.plate.trim().toUpperCase(),
         brand: form.brand.trim(),
@@ -196,6 +204,44 @@ export default function EditVehicleScreen({ navigation, route }) {
         purchaseDate: form.purchaseDate || '',
         purchaseKm: form.purchaseKm ? parseInt(form.purchaseKm) : '',
       });
+
+      // Re-arm all deadline notifications (the helper cancels stale ones first).
+      scheduleVehicleDeadlines({
+        id: vehicleId,
+        plate: form.plate.trim().toUpperCase(),
+        brand: form.brand.trim(),
+        itpDate: form.itpDate,
+        rcaDate: form.rcaDate,
+        cascoDate: form.cascoDate,
+        rovDate: form.rovDate,
+      }).catch(() => {});
+
+      // Offer to add only deadlines that were just added or changed.
+      const plate = form.plate.trim().toUpperCase();
+      const changed = [
+        { name: 'ITP', date: form.itpDate, prev: prev.itpDate },
+        { name: 'RCA', date: form.rcaDate, prev: prev.rcaDate },
+        { name: 'CASCO', date: form.cascoDate, prev: prev.cascoDate },
+        { name: 'Rovinietă', date: form.rovDate, prev: prev.rovDate },
+      ].filter(d => d.date && d.date !== d.prev);
+
+      if (changed.length > 0) {
+        await promptAddToDeviceCalendar({
+          title: changed.length === 1
+            ? `Expiră ${changed[0].name} · ${plate}`
+            : `Termene actualizate · ${plate}`,
+          notes: changed.map(d => `${d.name}: ${d.date}`).join('\n'),
+          startDate: changed[0].date,
+          endDate: changed[0].date,
+          allDay: true,
+          alarmsMinutesBefore: [60 * 24 * 7, 60 * 24 * 3, 60 * 24],
+        }, {
+          message: changed.length === 1
+            ? `Adăugăm scadența ${changed[0].name} în calendarul telefonului?`
+            : 'Adăugăm prima scadență nouă în calendarul telefonului?',
+        });
+      }
+
       navigation.goBack();
     } catch (e) {
       const msg = e.response?.data?.error || 'Nu s-a putut actualiza vehiculul. Încearcă din nou.';
