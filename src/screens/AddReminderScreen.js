@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -9,15 +9,50 @@ import {
   Alert,
   Platform,
   KeyboardAvoidingView,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import useStore from '../store';
-import { T, FONTS, RADIUS, SHADOW } from '../theme';
+import {
+  T,
+  FONTS,
+  RADIUS,
+  SHADOW,
+  SPACING,
+  useResponsive,
+  HIT_SLOP,
+  HIT_SLOP_LG,
+  TOUCH_TARGET,
+  formatDate,
+  daysUntil,
+  IS_IOS,
+} from '../theme';
 import DateField from '../components/DateField';
-import { PrimaryButton } from '../components/ui';
 
-const REMINDER_TYPES = ['ITP', 'RCA', 'CASCO', 'Rovinietă', 'Service', 'Altele'];
-const REPEAT_OPTIONS = ['Niciodată', 'Lunar', 'Anual'];
+// Categorii cu culori și iconițe (sync cu CalendarScreen)
+const REMINDER_TYPES = [
+  { key: 'itp',       label: 'ITP',       icon: '🔧', color: '#3B82F6', bg: '#EFF6FF' },
+  { key: 'rca',       label: 'RCA',       icon: '🛡️', color: '#10B981', bg: '#ECFDF5' },
+  { key: 'casco',     label: 'CASCO',     icon: '🔰', color: '#8B5CF6', bg: '#F5F3FF' },
+  { key: 'rovinieta', label: 'Rovinietă', icon: '🛣️', color: '#F59E0B', bg: '#FFFBEB' },
+  { key: 'service',   label: 'Service',   icon: '🔧', color: '#EF4444', bg: '#FEF2F2' },
+  { key: 'altele',    label: 'Altele',    icon: '📌', color: T.brand,   bg: T.brandTint },
+];
+
+const REPEAT_OPTIONS = [
+  { key: 'none',    label: 'Niciodată', icon: '⏸' },
+  { key: 'monthly', label: 'Lunar',     icon: '📅' },
+  { key: 'yearly',  label: 'Anual',     icon: '🗓' },
+];
+
+const DAY_ABBR = ['D', 'L', 'M', 'M', 'J', 'V', 'S'];
+
+function toYMD(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
 
 function getTwoWeekDays() {
   const days = [];
@@ -30,48 +65,46 @@ function getTwoWeekDays() {
   return days;
 }
 
-function toYMD(date) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
-
-const DAY_ABBR = ['D', 'L', 'M', 'M', 'J', 'V', 'S'];
-
 function validateDate(str) {
   if (!str) return false;
   return /^\d{4}-\d{2}-\d{2}$/.test(str) && !isNaN(new Date(str).getTime());
 }
 
-export default function AddReminderScreen({ navigation }) {
+export default function AddReminderScreen({ navigation, route }) {
   const { addReminder, vehicles } = useStore();
+  const selectedVehicleIdGlobal = useStore(s => s.selectedVehicleId);
+  const { isTablet, hPad, maxContentWidth } = useResponsive();
+
+  const presetVehicleId = route?.params?.vehicleId;
+  const initialVehicleId = presetVehicleId || selectedVehicleIdGlobal || null;
 
   const [title, setTitle] = useState('');
-  const [type, setType] = useState('ITP');
-  const [selectedVehicleId, setSelectedVehicleId] = useState(null);
+  const [typeKey, setTypeKey] = useState('itp');
+  const [selectedVehicleId, setSelectedVehicleId] = useState(initialVehicleId);
   const [dueDate, setDueDate] = useState('');
-  const [repeat, setRepeat] = useState('Niciodată');
+  const [repeat, setRepeat] = useState('none');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const twoWeekDays = getTwoWeekDays();
+  const twoWeekDays = useMemo(() => getTwoWeekDays(), []);
+  const selectedType = REMINDER_TYPES.find(t => t.key === typeKey) || REMINDER_TYPES[0];
+  const daysLeft = dueDate ? daysUntil(dueDate) : null;
 
-  const handleDayPick = (date) => {
-    setDueDate(toYMD(date));
-  };
+  const selectedVehicle = vehicles.find(v => v.id === selectedVehicleId);
+
+  const handleDayPick = (date) => setDueDate(toYMD(date));
 
   const handleSubmit = async () => {
     if (!title.trim()) {
-      Alert.alert('Eroare', 'Titlul este obligatoriu.');
+      Alert.alert('Eroare', 'Adaugă un titlu pentru reminder.');
       return;
     }
     if (!dueDate) {
-      Alert.alert('Eroare', 'Data scadenței este obligatorie.');
+      Alert.alert('Eroare', 'Alege data scadenței.');
       return;
     }
     if (!validateDate(dueDate)) {
-      Alert.alert('Eroare', 'Data trebuie să fie în formatul YYYY-MM-DD și să fie validă.');
+      Alert.alert('Eroare', 'Data nu este validă.');
       return;
     }
     setSaving(true);
@@ -79,275 +112,449 @@ export default function AddReminderScreen({ navigation }) {
       await addReminder({
         title: title.trim(),
         dueDate,
-        type,
+        type: typeKey,
         vehicleId: selectedVehicleId || undefined,
         repeat,
         notes: notes.trim() || undefined,
       });
       navigation.goBack();
     } catch {
-      Alert.alert('Eroare', 'Nu s-a putut salva reminderul. Încearcă din nou.');
+      Alert.alert('Eroare', 'Nu s-a putut salva reminderul.');
     } finally {
       setSaving(false);
     }
   };
 
+  // Status culoare zile rămase
+  let daysColor = T.ink3;
+  let daysLabel = '';
+  if (daysLeft !== null) {
+    if (daysLeft === 0) { daysLabel = 'Astăzi'; daysColor = T.brand; }
+    else if (daysLeft === 1) { daysLabel = 'Mâine'; daysColor = T.warn; }
+    else if (daysLeft < 0) { daysLabel = `acum ${Math.abs(daysLeft)} zile`; daysColor = T.danger; }
+    else if (daysLeft <= 7) { daysLabel = `în ${daysLeft} zile`; daysColor = T.danger; }
+    else if (daysLeft <= 30) { daysLabel = `în ${daysLeft} zile`; daysColor = T.warn; }
+    else { daysLabel = `în ${daysLeft} zile`; daysColor = T.success; }
+  }
+
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.closeBtn} activeOpacity={0.7}>
-          <Text style={styles.closeText}>✕</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Reminder Nou</Text>
-        <View style={styles.closeBtn} />
-      </View>
+    <View style={styles.root}>
+      {/* Hero header */}
+      <SafeAreaView style={styles.hero} edges={['top']}>
+        <View style={[styles.heroContent, { paddingHorizontal: hPad }]}>
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            hitSlop={HIT_SLOP_LG}
+            style={styles.heroBack}
+          >
+            <Text style={styles.heroBackText}>✕</Text>
+          </TouchableOpacity>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.heroSubtitle}>REMINDER NOU</Text>
+            <Text style={styles.heroTitle}>
+              {selectedType.icon} {selectedType.label}
+            </Text>
+            {dueDate ? (
+              <Text style={styles.heroDate}>
+                {formatDate(dueDate)}
+                {daysLabel ? ` · ${daysLabel}` : ''}
+              </Text>
+            ) : (
+              <Text style={styles.heroDateMuted}>Alege o dată mai jos</Text>
+            )}
+          </View>
+        </View>
+      </SafeAreaView>
 
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={{ flex: 1 }}
+        behavior={IS_IOS ? 'padding' : undefined}
       >
         <ScrollView
-          contentContainerStyle={styles.content}
+          contentContainerStyle={[
+            { paddingHorizontal: hPad, paddingVertical: SPACING.xl, gap: SPACING.lg },
+            isTablet && { alignSelf: 'center', width: '100%', maxWidth: maxContentWidth },
+          ]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          <Text style={styles.label}>Titlu *</Text>
-          <TextInput
-            style={styles.titleInput}
-            placeholder="Ex: Reînnoire RCA"
-            placeholderTextColor={T.ink4}
-            value={title}
-            onChangeText={setTitle}
-            autoFocus
-          />
-
-          <Text style={styles.label}>Tip</Text>
-          <View style={styles.typeGrid}>
-            {REMINDER_TYPES.map(t => (
-              <TouchableOpacity
-                key={t}
-                style={[styles.typeBtn, type === t && styles.typeBtnActive]}
-                onPress={() => setType(t)}
-                activeOpacity={0.8}
-              >
-                <Text style={[styles.typeBtnText, type === t && styles.typeBtnTextActive]}>{t}</Text>
-              </TouchableOpacity>
-            ))}
+          {/* Titlu */}
+          <View style={styles.card}>
+            <Text style={styles.label}>Titlu *</Text>
+            <TextInput
+              style={styles.titleInput}
+              placeholder='Ex: "Reînnoire RCA Dacia"'
+              placeholderTextColor={T.ink4}
+              value={title}
+              onChangeText={setTitle}
+              autoFocus
+            />
           </View>
 
-          <Text style={styles.label}>Vehicul (opțional)</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.vehicleScroll}>
-            <TouchableOpacity
-              style={[styles.vehicleBtn, selectedVehicleId === null && styles.vehicleBtnActive]}
-              onPress={() => setSelectedVehicleId(null)}
-              activeOpacity={0.8}
+          {/* Categorie */}
+          <View style={styles.card}>
+            <Text style={styles.label}>Categorie</Text>
+            <View style={styles.catGrid}>
+              {REMINDER_TYPES.map(t => {
+                const active = typeKey === t.key;
+                return (
+                  <TouchableOpacity
+                    key={t.key}
+                    onPress={() => setTypeKey(t.key)}
+                    activeOpacity={0.85}
+                    style={[
+                      styles.catTile,
+                      { backgroundColor: active ? t.color : t.bg },
+                      active && { borderColor: t.color, ...SHADOW.sm },
+                    ]}
+                  >
+                    <Text style={[styles.catIcon, { opacity: active ? 1 : 0.85 }]}>
+                      {t.icon}
+                    </Text>
+                    <Text style={[
+                      styles.catLabel,
+                      { color: active ? '#fff' : t.color },
+                    ]}>
+                      {t.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+
+          {/* Vehicul */}
+          <View style={styles.card}>
+            <Text style={styles.label}>Vehicul (opțional)</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ gap: 8, paddingVertical: 4 }}
             >
-              <Text style={[styles.vehicleBtnText, selectedVehicleId === null && styles.vehicleBtnTextActive]}>
-                Fără vehicul
-              </Text>
-            </TouchableOpacity>
-            {vehicles.map(v => (
               <TouchableOpacity
-                key={v.id}
-                style={[styles.vehicleBtn, selectedVehicleId === v.id && styles.vehicleBtnActive]}
-                onPress={() => setSelectedVehicleId(v.id)}
-                activeOpacity={0.8}
+                onPress={() => setSelectedVehicleId(null)}
+                activeOpacity={0.85}
+                style={[styles.vehChip, !selectedVehicleId && styles.vehChipActive]}
               >
-                <Text style={[styles.vehicleBtnText, selectedVehicleId === v.id && styles.vehicleBtnTextActive]}>
-                  {v.plate}
+                <Text style={[styles.vehChipText, !selectedVehicleId && styles.vehChipTextActive]}>
+                  👤 Personal
                 </Text>
               </TouchableOpacity>
-            ))}
-          </ScrollView>
+              {vehicles.map(v => {
+                const active = selectedVehicleId === v.id;
+                return (
+                  <TouchableOpacity
+                    key={v.id}
+                    onPress={() => setSelectedVehicleId(v.id)}
+                    activeOpacity={0.85}
+                    style={[styles.vehChip, active && styles.vehChipActive]}
+                  >
+                    <Text style={[styles.vehChipText, active && styles.vehChipTextActive]}>
+                      🚗 {v.plate}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+            {selectedVehicle && (
+              <Text style={styles.vehHint}>
+                {selectedVehicle.brand} {selectedVehicle.model} · {selectedVehicle.year}
+              </Text>
+            )}
+          </View>
 
-          <Text style={styles.label}>Data scadenței *</Text>
+          {/* Data scadenței */}
+          <View style={styles.card}>
+            <Text style={styles.label}>Data scadenței *</Text>
+            <Text style={styles.sublabel}>Atinge o zi rapid sau folosește calendarul</Text>
 
-          <View style={styles.miniCalendar}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.miniCalContent}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ gap: 8, paddingVertical: 8 }}
+            >
               {twoWeekDays.map((d, idx) => {
                 const ymd = toYMD(d);
                 const selected = dueDate === ymd;
+                const isToday = idx === 0;
                 return (
                   <TouchableOpacity
                     key={idx}
-                    style={[styles.miniDay, selected && styles.miniDaySelected]}
                     onPress={() => handleDayPick(d)}
-                    activeOpacity={0.8}
+                    activeOpacity={0.85}
+                    style={[
+                      styles.miniDay,
+                      selected && styles.miniDaySelected,
+                      isToday && !selected && styles.miniDayToday,
+                    ]}
                   >
-                    <Text style={[styles.miniDayName, selected && styles.miniDayTextSelected]}>
-                      {DAY_ABBR[d.getDay()]}
+                    <Text style={[
+                      styles.miniDayLabel,
+                      selected && styles.miniDayLabelSelected,
+                      isToday && !selected && { color: T.brand },
+                    ]}>
+                      {isToday ? 'Azi' : DAY_ABBR[d.getDay()]}
                     </Text>
-                    <Text style={[styles.miniDayNum, selected && styles.miniDayTextSelected]}>
+                    <Text style={[
+                      styles.miniDayNum,
+                      selected && styles.miniDayNumSelected,
+                    ]}>
                       {d.getDate()}
                     </Text>
                   </TouchableOpacity>
                 );
               })}
             </ScrollView>
+
+            <View style={styles.divider}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>sau</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            <DateField
+              label="Alege din calendar"
+              value={dueDate}
+              onChange={setDueDate}
+              minDate={new Date()}
+              showRelative
+            />
           </View>
 
-          <DateField
-            label="Sau alege din calendar"
-            value={dueDate}
-            onChange={setDueDate}
-            minDate={new Date()}
-            showRelative
-          />
-
-          <Text style={styles.label}>Repetare</Text>
-          <View style={styles.repeatRow}>
-            {REPEAT_OPTIONS.map(opt => (
-              <TouchableOpacity
-                key={opt}
-                style={[styles.repeatBtn, repeat === opt && styles.repeatBtnActive]}
-                onPress={() => setRepeat(opt)}
-                activeOpacity={0.8}
-              >
-                <Text style={[styles.repeatBtnText, repeat === opt && styles.repeatBtnTextActive]}>{opt}</Text>
-              </TouchableOpacity>
-            ))}
+          {/* Repetare */}
+          <View style={styles.card}>
+            <Text style={styles.label}>Se repetă</Text>
+            <View style={styles.repeatRow}>
+              {REPEAT_OPTIONS.map(opt => {
+                const active = repeat === opt.key;
+                return (
+                  <TouchableOpacity
+                    key={opt.key}
+                    onPress={() => setRepeat(opt.key)}
+                    activeOpacity={0.85}
+                    style={[styles.repeatBtn, active && styles.repeatBtnActive]}
+                  >
+                    <Text style={styles.repeatIcon}>{opt.icon}</Text>
+                    <Text style={[styles.repeatText, active && styles.repeatTextActive]}>
+                      {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
           </View>
 
-          <Text style={styles.label}>Notă (opțional)</Text>
-          <TextInput
-            style={styles.notesInput}
-            placeholder="Detalii suplimentare..."
-            placeholderTextColor={T.ink4}
-            value={notes}
-            onChangeText={setNotes}
-            multiline
-            numberOfLines={3}
-            textAlignVertical="top"
-          />
-
-          <View style={styles.submitWrap}>
-            <PrimaryButton title="Salvează Reminder" onPress={handleSubmit} loading={saving} />
+          {/* Notițe */}
+          <View style={styles.card}>
+            <Text style={styles.label}>Notițe (opțional)</Text>
+            <TextInput
+              style={styles.notesInput}
+              placeholder="Detalii suplimentare, sumă, observații..."
+              placeholderTextColor={T.ink4}
+              value={notes}
+              onChangeText={setNotes}
+              multiline
+              numberOfLines={3}
+              textAlignVertical="top"
+            />
           </View>
+
+          {/* Submit */}
+          <TouchableOpacity
+            style={[
+              styles.submitBtn,
+              (saving || !title.trim() || !dueDate) && styles.submitBtnDisabled,
+              { backgroundColor: selectedType.color },
+            ]}
+            onPress={handleSubmit}
+            disabled={saving || !title.trim() || !dueDate}
+            activeOpacity={0.85}
+          >
+            {saving ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.submitBtnText}>
+                {selectedType.icon}  Salvează reminderul
+              </Text>
+            )}
+          </TouchableOpacity>
+
+          <View style={{ height: 24 }} />
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: T.bg },
-  header: {
+  root: { flex: 1, backgroundColor: T.bg },
+
+  // Hero
+  hero: { backgroundColor: T.brand },
+  heroContent: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: T.line,
-    backgroundColor: T.card,
+    alignItems: 'flex-start',
+    paddingTop: SPACING.md,
+    paddingBottom: SPACING.xl,
+    gap: SPACING.md,
   },
-  headerTitle: { fontSize: 18, fontWeight: FONTS.bold, color: T.ink },
-  closeBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  closeText: { fontSize: 18, color: T.ink3 },
-  content: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 40 },
-  label: { fontSize: 13, fontWeight: FONTS.semibold, color: T.ink3, marginBottom: 8, marginTop: 20 },
-  titleInput: {
-    backgroundColor: T.card,
-    borderRadius: RADIUS.md,
-    borderWidth: 1,
-    borderColor: T.line,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 17,
+  heroBack: {
+    width: TOUCH_TARGET, height: TOUCH_TARGET,
+    borderRadius: TOUCH_TARGET / 2,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  heroBackText: { color: '#fff', fontSize: 18, fontWeight: FONTS.bold },
+  heroSubtitle: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 11,
     fontWeight: FONTS.bold,
+    letterSpacing: 1.5,
+  },
+  heroTitle: {
+    color: '#fff',
+    fontSize: 26,
+    fontWeight: FONTS.bold,
+    marginTop: 4,
+  },
+  heroDate: {
+    color: 'rgba(255,255,255,0.95)',
+    fontSize: 13,
+    fontWeight: FONTS.semibold,
+    marginTop: 4,
+  },
+  heroDateMuted: {
+    color: 'rgba(255,255,255,0.65)',
+    fontSize: 12,
+    fontStyle: 'italic',
+    marginTop: 4,
+  },
+
+  // Cards
+  card: {
+    backgroundColor: T.card,
+    borderRadius: RADIUS.lg,
+    padding: SPACING.lg,
+    ...SHADOW.sm,
+  },
+  label: {
+    fontSize: 12,
+    fontWeight: FONTS.bold,
+    color: T.ink2,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    marginBottom: SPACING.sm,
+  },
+  sublabel: { fontSize: 12, color: T.ink3, marginTop: -SPACING.xs, marginBottom: SPACING.sm },
+
+  titleInput: {
+    backgroundColor: T.bgSoft,
+    borderWidth: 1.5,
+    borderColor: T.line,
+    borderRadius: RADIUS.md,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: 12,
+    fontSize: 17,
+    fontWeight: FONTS.semibold,
     color: T.ink,
-    ...SHADOW.sm,
+    minHeight: 50,
   },
-  typeGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
+
+  // Categorie grid
+  catGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.sm },
+  catTile: {
+    flexGrow: 1,
+    flexBasis: '30%',
+    paddingVertical: 14,
+    paddingHorizontal: 8,
+    borderRadius: RADIUS.lg,
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: 2,
+    borderColor: 'transparent',
   },
-  typeBtn: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: RADIUS.md,
-    backgroundColor: T.card,
-    borderWidth: 1,
-    borderColor: T.line,
-    ...SHADOW.sm,
-  },
-  typeBtnActive: { backgroundColor: T.brand, borderColor: T.brand },
-  typeBtnText: { fontSize: 14, fontWeight: FONTS.medium, color: T.ink2 },
-  typeBtnTextActive: { color: '#fff' },
-  vehicleScroll: { marginBottom: 4 },
-  vehicleBtn: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+  catIcon: { fontSize: 22 },
+  catLabel: { fontSize: 12, fontWeight: FONTS.bold, letterSpacing: 0.3 },
+
+  // Vehicul chips
+  vehChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
     borderRadius: RADIUS.full,
-    backgroundColor: T.card,
-    borderWidth: 1,
+    backgroundColor: T.bgSoft,
+    borderWidth: 1.5,
     borderColor: T.line,
-    marginRight: 8,
-    ...SHADOW.sm,
   },
-  vehicleBtnActive: { backgroundColor: T.brand, borderColor: T.brand },
-  vehicleBtnText: { fontSize: 13, fontWeight: FONTS.medium, color: T.ink2 },
-  vehicleBtnTextActive: { color: '#fff' },
-  miniCalendar: {
-    backgroundColor: T.card,
-    borderRadius: RADIUS.md,
-    borderWidth: 1,
-    borderColor: T.line,
-    marginBottom: 10,
-    paddingVertical: 10,
-    ...SHADOW.sm,
-  },
-  miniCalContent: { paddingHorizontal: 10, gap: 6 },
+  vehChipActive: { backgroundColor: T.brand, borderColor: T.brand },
+  vehChipText: { fontSize: 13, fontWeight: FONTS.semibold, color: T.ink2 },
+  vehChipTextActive: { color: '#fff' },
+  vehHint: { fontSize: 12, color: T.ink3, marginTop: SPACING.sm, fontStyle: 'italic' },
+
+  // Mini days
   miniDay: {
-    width: 44,
-    height: 56,
+    width: 52,
+    paddingVertical: 10,
     borderRadius: RADIUS.md,
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: T.line2,
-    marginRight: 6,
-  },
-  miniDaySelected: { backgroundColor: T.brand },
-  miniDayName: { fontSize: 11, fontWeight: FONTS.semibold, color: T.ink3, marginBottom: 4 },
-  miniDayNum: { fontSize: 16, fontWeight: FONTS.bold, color: T.ink },
-  miniDayTextSelected: { color: '#fff' },
-  input: {
-    backgroundColor: T.card,
-    borderRadius: RADIUS.md,
-    borderWidth: 1,
+    backgroundColor: T.bgSoft,
+    borderWidth: 1.5,
     borderColor: T.line,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 15,
-    color: T.ink,
+  },
+  miniDaySelected: {
+    backgroundColor: T.brand,
+    borderColor: T.brand,
     ...SHADOW.sm,
   },
-  repeatRow: { flexDirection: 'row', gap: 10 },
+  miniDayToday: { borderColor: T.brand, borderWidth: 2 },
+  miniDayLabel: { fontSize: 10, fontWeight: FONTS.bold, color: T.ink3, letterSpacing: 0.5 },
+  miniDayLabelSelected: { color: '#fff' },
+  miniDayNum: { fontSize: 18, fontWeight: FONTS.bold, color: T.ink, marginTop: 2 },
+  miniDayNumSelected: { color: '#fff' },
+
+  divider: { flexDirection: 'row', alignItems: 'center', marginVertical: SPACING.md, gap: 8 },
+  dividerLine: { flex: 1, height: 1, backgroundColor: T.line },
+  dividerText: { fontSize: 11, color: T.ink4, fontWeight: FONTS.medium },
+
+  // Repeat
+  repeatRow: { flexDirection: 'row', gap: SPACING.sm },
   repeatBtn: {
     flex: 1,
-    paddingVertical: 12,
+    paddingVertical: SPACING.md,
     borderRadius: RADIUS.md,
-    backgroundColor: T.card,
-    borderWidth: 1,
+    backgroundColor: T.bgSoft,
+    borderWidth: 1.5,
     borderColor: T.line,
     alignItems: 'center',
-    ...SHADOW.sm,
+    gap: 2,
   },
-  repeatBtnActive: { backgroundColor: T.brand, borderColor: T.brand },
-  repeatBtnText: { fontSize: 13, fontWeight: FONTS.medium, color: T.ink2 },
-  repeatBtnTextActive: { color: '#fff' },
+  repeatBtnActive: { backgroundColor: T.brand, borderColor: T.brand, ...SHADOW.sm },
+  repeatIcon: { fontSize: 20 },
+  repeatText: { fontSize: 12, fontWeight: FONTS.semibold, color: T.ink2 },
+  repeatTextActive: { color: '#fff', fontWeight: FONTS.bold },
+
+  // Notes
   notesInput: {
-    backgroundColor: T.card,
-    borderRadius: RADIUS.md,
-    borderWidth: 1,
+    backgroundColor: T.bgSoft,
+    borderWidth: 1.5,
     borderColor: T.line,
-    paddingHorizontal: 14,
+    borderRadius: RADIUS.md,
+    paddingHorizontal: SPACING.md,
     paddingVertical: 12,
-    fontSize: 15,
+    fontSize: 14,
     color: T.ink,
-    minHeight: 88,
-    ...SHADOW.sm,
+    minHeight: 84,
   },
-  submitWrap: { marginTop: 28 },
+
+  // Submit
+  submitBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 56,
+    borderRadius: RADIUS.lg,
+    ...SHADOW.md,
+    marginTop: SPACING.sm,
+  },
+  submitBtnDisabled: { opacity: 0.5 },
+  submitBtnText: { color: '#fff', fontSize: 16, fontWeight: FONTS.bold, letterSpacing: 0.3 },
 });

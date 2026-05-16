@@ -40,6 +40,7 @@ import {
   MAX_HOME_QUICK_ACTIONS,
   normalizeQuickActionIds,
 } from '../utils/quickActions';
+import { sendTestLocalNotification } from '../hooks/usePushNotifications';
 
 const APP_VERSION = packageJson.version || '1.0.0';
 
@@ -700,6 +701,21 @@ export default function ProfileScreen({ navigation }) {
               label="Vezi notificările"
               sub="Istoric alerte primite"
               onPress={() => navigation.navigate('Notifications')}
+            />
+            <View style={styles.infoSep} />
+            <ActionRow
+              icon="🧪"
+              label="Test notificare"
+              sub="Trimite o notificare locală de test (apare în 1s)"
+              onPress={async () => {
+                const ok = await sendTestLocalNotification();
+                if (!ok) {
+                  Alert.alert(
+                    'Eroare',
+                    'Nu s-a putut trimite notificarea. Verifică permisiunile în setările telefonului.',
+                  );
+                }
+              }}
             />
           </Card>
 
