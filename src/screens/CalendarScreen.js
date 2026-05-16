@@ -87,18 +87,32 @@ function getEventsForDay(dateStr, reminders, vehicles) {
 
 export default function CalendarScreen({ navigation }) {
   const { reminders, vehicles, fetchReminders, fetchVehicles } = useStore();
+  const selectedVehicleIdGlobal = useStore(s => s.selectedVehicleId);
   const { isTablet, hPad, maxContentWidth } = useResponsive();
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
   const [selectedDay, setSelectedDay] = useState(today.getDate());
   const [refreshing, setRefreshing] = useState(false);
+  const [vehicleFilter, setVehicleFilter] = useState(selectedVehicleIdGlobal || 'all');
   const { updateReminder, deleteReminder } = useStore();
 
   useEffect(() => {
     fetchReminders();
     if (fetchVehicles) fetchVehicles();
   }, []);
+
+  useEffect(() => {
+    if (selectedVehicleIdGlobal) setVehicleFilter(selectedVehicleIdGlobal);
+  }, [selectedVehicleIdGlobal]);
+
+  // Filtered lists by selected vehicle
+  const filteredVehicles = vehicleFilter === 'all'
+    ? vehicles
+    : vehicles.filter(v => v.id === vehicleFilter);
+  const filteredReminders = vehicleFilter === 'all'
+    ? reminders
+    : reminders.filter(r => !r.vehicleId || r.vehicleId === vehicleFilter);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -117,13 +131,13 @@ export default function CalendarScreen({ navigation }) {
   };
 
   const calDays = buildCalendarDays(year, month);
-  const eventDates = getEventDates(reminders, vehicles);
+  const eventDates = getEventDates(filteredReminders, filteredVehicles);
 
   const todayStr = toYMD(today);
   const selectedDateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(selectedDay).padStart(2, '0')}`;
-  const selectedEvents = getEventsForDay(selectedDateStr, reminders, vehicles);
+  const selectedEvents = getEventsForDay(selectedDateStr, filteredReminders, filteredVehicles);
 
-  const monthReminders = reminders.filter(r => {
+  const monthReminders = filteredReminders.filter(r => {
     if (!r.dueDate) return false;
     const d = new Date(r.dueDate);
     return d.getFullYear() === year && d.getMonth() === month;
@@ -149,6 +163,34 @@ export default function CalendarScreen({ navigation }) {
         <View style={[styles.header, { paddingHorizontal: hPad }]}>
           <Text style={styles.headerTitle}>Calendar & Remindere</Text>
         </View>
+
+        {vehicles.length > 0 && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ paddingHorizontal: hPad, gap: 8, paddingBottom: 12 }}
+          >
+            <TouchableOpacity
+              onPress={() => setVehicleFilter('all')}
+              style={[styles.vehChip, vehicleFilter === 'all' && styles.vehChipActive]}
+            >
+              <Text style={[styles.vehChipText, vehicleFilter === 'all' && styles.vehChipTextActive]}>
+                Toate vehiculele
+              </Text>
+            </TouchableOpacity>
+            {vehicles.map(v => (
+              <TouchableOpacity
+                key={v.id}
+                onPress={() => setVehicleFilter(v.id)}
+                style={[styles.vehChip, vehicleFilter === v.id && styles.vehChipActive]}
+              >
+                <Text style={[styles.vehChipText, vehicleFilter === v.id && styles.vehChipTextActive]}>
+                  {v.plate}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
 
         <View style={styles.calCard}>
           <View style={styles.calNav}>
@@ -278,6 +320,14 @@ const styles = StyleSheet.create({
   calNav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
   navBtn: { width: TOUCH_TARGET, height: TOUCH_TARGET, alignItems: 'center', justifyContent: 'center', backgroundColor: T.line2, borderRadius: RADIUS.md },
   navArrow: { fontSize: 22, color: T.ink2, lineHeight: 26 },
+  vehChip: {
+    paddingHorizontal: 14, paddingVertical: 8,
+    borderRadius: RADIUS.full, backgroundColor: T.card,
+    borderWidth: 1.5, borderColor: T.line,
+  },
+  vehChipActive: { backgroundColor: T.brand, borderColor: T.brand },
+  vehChipText: { fontSize: 13, fontWeight: FONTS.medium, color: T.ink2 },
+  vehChipTextActive: { color: '#fff', fontWeight: FONTS.bold },
   calMonthYear: { fontSize: 16, fontWeight: FONTS.bold, color: T.ink },
   dayLabelsRow: { flexDirection: 'row', marginBottom: 8 },
   dayLabelCell: { flex: 1, alignItems: 'center' },

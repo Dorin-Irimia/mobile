@@ -127,11 +127,17 @@ export default function InvoicesScreen({ navigation }) {
   const fetchFuelLogs = useStore(s => s.fetchFuelLogs);
   const deleteFuelLog = useStore(s => s.deleteFuelLog);
   const user = useStore(s => s.user);
+  const selectedVehicleIdGlobal = useStore(s => s.selectedVehicleId);
   const { isTablet, hPad, maxContentWidth } = useResponsive();
   const safeBottom = useSafeBottomPadding(28);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [vehicleFilter, setVehicleFilter] = useState('toate');
+  const [vehicleFilter, setVehicleFilter] = useState(selectedVehicleIdGlobal || 'toate');
+
+  // Sincronizează cu vehiculul activ pe Home
+  useEffect(() => {
+    if (selectedVehicleIdGlobal) setVehicleFilter(selectedVehicleIdGlobal);
+  }, [selectedVehicleIdGlobal]);
   const [catFilter, setCatFilter] = useState('toate');
   const [detailInv, setDetailInv] = useState(null);
   const [viewerAttachment, setViewerAttachment] = useState(null);

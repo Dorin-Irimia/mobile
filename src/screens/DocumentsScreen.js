@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -10,11 +10,14 @@ import {
   Alert,
   StyleSheet,
   RefreshControl,
-  Platform,
   KeyboardAvoidingView,
+  Platform,
+  Image,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 import useStore from '../store';
 import {
   T,
@@ -27,521 +30,915 @@ import {
   useResponsive,
   useSafeBottomPadding,
   HIT_SLOP,
+  HIT_SLOP_LG,
   TOUCH_TARGET,
-  IS_IOS,
 } from '../theme';
-import { Card, Pill, PrimaryButton, EmptyState, LoadingView, StatusBadge } from '../components/ui';
+import { Card, EmptyState, LoadingView, StatusBadge, PrimaryButton } from '../components/ui';
+import AttachmentViewer from '../components/AttachmentViewer';
 import DateField from '../components/DateField';
+import SourcePickerSheet from '../components/SourcePickerSheet';
+import { getApiUrl } from '../api/client';
 
-const CATEGORIES = ['Toate', 'Talon', 'RCA', 'CASCO', 'ITP', 'Factură', 'Garanție'];
+const EMOJI_OPTIONS = ['📁', '📂', '🗂', '🔧', '🛡️', '🔰', '🛣️', '🪪', '🧾', '📋', '📄', '🛠️', '⚙️', '🔑', '📜', '✍️'];
 
-const TYPE_ICONS = {
-  talon: '📄',
-  rca: '🛡',
-  casco: '🔰',
-  itp: '🔧',
-  factura: '🧾',
-  factura2: '🧾',
-  garantie: '📋',
+function fileIcon(doc) {
+  const mime = doc.mimeType || '';
+  if (mime.startsWith('image/')) return '🖼️';
+  if (mime === 'application/pdf') return '📄';
+  if (mime.includes('word') || mime.includes('officedocument.wordprocessingml')) return '📝';
+  if (mime.includes('sheet') || mime.includes('excel') || mime.includes('spreadsheet')) return '📊';
+  if (mime.includes('presentation')) return '📊';
+  if (mime.startsWith('text/')) return '📃';
+  if (mime.startsWith('video/')) return '🎬';
+  if (mime.startsWith('audio/')) return '🎵';
+  return '📎';
+}
+
+function formatSize(bytes) {
+  if (!bytes) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+const VEHICLE_FIELD_LABELS = {
+  itpDate: 'ITP',
+  rcaDate: 'RCA',
+  cascoDate: 'CASCO',
+  rovDate: 'Rovinietă',
 };
 
-function getIcon(type) {
-  if (!type) return '📋';
-  const key = type.toLowerCase()
-    .replace(/ă/g, 'a')
-    .replace(/î/g, 'i')
-    .replace(/â/g, 'a')
-    .replace(/ș/g, 's')
-    .replace(/ț/g, 't')
-    .replace(/\s+/g, '');
-  return TYPE_ICONS[key] || '📋';
-}
-
-function normalizeStr(str) {
-  if (!str) return '';
-  return str.toLowerCase()
-    .replace(/ă/g, 'a')
-    .replace(/î/g, 'i')
-    .replace(/â/g, 'a')
-    .replace(/ș/g, 's')
-    .replace(/ț/g, 't')
-    .trim();
-}
-
-const DOC_TYPES = ['Talon', 'RCA', 'CASCO', 'ITP', 'Factură', 'Garanție', 'Altele'];
-
 export default function DocumentsScreen({ navigation }) {
-  const { documents, vehicles, fetchDocuments, addDocument, deleteDocument } = useStore();
+  const documents = useStore(s => s.documents);
+  const folders = useStore(s => s.folders);
+  const vehicles = useStore(s => s.vehicles);
+  const user = useStore(s => s.user);
+  const selectedVehicleIdGlobal = useStore(s => s.selectedVehicleId);
+  const fetchDocuments = useStore(s => s.fetchDocuments);
+  const fetchFolders = useStore(s => s.fetchFolders);
+  const fetchVehicles = useStore(s => s.fetchVehicles);
+  const addDocument = useStore(s => s.addDocument);
+  const updateDocument = useStore(s => s.updateDocument);
+  const deleteDocument = useStore(s => s.deleteDocument);
+  const createFolder = useStore(s => s.createFolder);
+  const deleteFolder = useStore(s => s.deleteFolder);
+  const updateVehicle = useStore(s => s.updateVehicle);
+
   const { isTablet, hPad, maxContentWidth } = useResponsive();
   const safeBottom = useSafeBottomPadding(28);
-  const [activeCategory, setActiveCategory] = useState('Toate');
-  const [refreshing, setRefreshing] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [detailDoc, setDetailDoc] = useState(null);
-  const [showAdd, setShowAdd] = useState(false);
-  const [saving, setSaving] = useState(false);
 
-  const [formName, setFormName] = useState('');
-  const [formType, setFormType] = useState('Talon');
-  const [formVehicleId, setFormVehicleId] = useState('');
-  const [formExpiry, setFormExpiry] = useState('');
-  const [formImage, setFormImage] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [vehicleFilter, setVehicleFilter] = useState(selectedVehicleIdGlobal || 'all');
+  const [openFolderId, setOpenFolderId] = useState(null);    // null = root level
+
+  // Când utilizatorul schimbă vehiculul activ pe Home, re-aplicăm filtrul aici
+  useEffect(() => {
+    if (selectedVehicleIdGlobal) setVehicleFilter(selectedVehicleIdGlobal);
+  }, [selectedVehicleIdGlobal]);
+
+  const [viewerDoc, setViewerDoc] = useState(null);
+
+  // Add doc modal
+  const [showAddDoc, setShowAddDoc] = useState(false);
+  const [addingDocLoading, setAddingDocLoading] = useState(false);
+  const [docName, setDocName] = useState('');
+  const [docFile, setDocFile] = useState(null);
+  const [docExpiry, setDocExpiry] = useState('');
+  const [docVehicleId, setDocVehicleId] = useState(null);
+  const [docFolderId, setDocFolderId] = useState(null);
+  const [docNotes, setDocNotes] = useState('');
+
+  // Add folder modal
+  const [showAddFolder, setShowAddFolder] = useState(false);
+  const [folderName, setFolderName] = useState('');
+  const [folderIcon, setFolderIcon] = useState('📁');
+  const [folderVehicleId, setFolderVehicleId] = useState(null);
+
+  // Source picker
+  const [sourceSheetVisible, setSourceSheetVisible] = useState(false);
+
+  // Sync prompt
+  const [syncPrompt, setSyncPrompt] = useState(null); // { docId, field, oldDate, newDate, vehicleId, plate }
+
+  const apiUrl = getApiUrl();
+
+  const load = useCallback(async () => {
+    await Promise.all([
+      fetchDocuments(),
+      fetchFolders(),
+      fetchVehicles(),
+    ]);
+  }, [fetchDocuments, fetchFolders, fetchVehicles]);
 
   useEffect(() => {
-    fetchDocuments().finally(() => setLoading(false));
+    (async () => { await load(); setLoading(false); })();
   }, []);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await fetchDocuments();
+    await load();
     setRefreshing(false);
-  }, []);
+  }, [load]);
 
-  const filteredDocs = activeCategory === 'Toate'
-    ? documents
-    : documents.filter(d => normalizeStr(d.type) === normalizeStr(activeCategory));
-
-  const vehicleName = (id) => {
-    const v = vehicles.find(veh => veh.id === id);
-    return v ? `${v.make} ${v.model} · ${v.plate}` : '—';
-  };
-
-  const pickImage = async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert('Permisiune necesară', 'Acordă acces la bibliotecă pentru a atașa fișiere.');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.All,
-      allowsEditing: false,
-      quality: 0.85,
+  // Build filtered folder list based on vehicle filter
+  const visibleFolders = useMemo(() => {
+    return (folders || []).filter(f => {
+      if (vehicleFilter === 'all') return true;
+      if (vehicleFilter === 'personal') return !f.vehicleId;
+      return f.vehicleId === vehicleFilter;
     });
-    if (!result.canceled && result.assets?.length) {
-      setFormImage(result.assets[0]);
-    }
-  };
+  }, [folders, vehicleFilter]);
 
-  const resetForm = () => {
-    setFormName('');
-    setFormType('Talon');
-    setFormVehicleId('');
-    setFormExpiry('');
-    setFormImage(null);
-  };
+  // Documents in current folder
+  const openFolder = useMemo(
+    () => folders.find(f => f.id === openFolderId),
+    [folders, openFolderId],
+  );
 
-  const handleSave = async () => {
-    if (!formName.trim()) {
-      Alert.alert('Eroare', 'Introduceți numele documentului.');
-      return;
-    }
-    setSaving(true);
-    try {
-      const formData = new FormData();
-      formData.append('name', formName.trim());
-      formData.append('type', formType);
-      if (formVehicleId) formData.append('vehicleId', formVehicleId);
-      if (formExpiry) formData.append('expiryDate', formExpiry);
-      if (formImage) {
-        const uri = formImage.uri;
-        const filename = uri.split('/').pop();
-        const match = /\.(\w+)$/.exec(filename);
-        const mimeType = match ? `image/${match[1].toLowerCase()}` : 'image/jpeg';
-        formData.append('image', { uri, name: filename, type: mimeType });
+  const currentDocs = useMemo(() => {
+    if (openFolderId) return documents.filter(d => d.folderId === openFolderId);
+    // Root: show docs without folder + docs filtered by vehicle
+    return documents.filter(d => {
+      if (vehicleFilter === 'all') return !d.folderId;
+      if (vehicleFilter === 'personal') return !d.vehicleId && !d.folderId;
+      return d.vehicleId === vehicleFilter && !d.folderId;
+    });
+  }, [documents, openFolderId, vehicleFilter]);
+
+  const docsByFolder = useMemo(() => {
+    const map = {};
+    documents.forEach(d => {
+      if (d.folderId) {
+        if (!map[d.folderId]) map[d.folderId] = 0;
+        map[d.folderId] += 1;
       }
-      await addDocument(formData);
-      setShowAdd(false);
-      resetForm();
-    } catch {
-      Alert.alert('Eroare', 'Nu s-a putut salva documentul.');
+    });
+    return map;
+  }, [documents]);
+
+  // Pick file (any type) — folosim un bottom sheet pentru a fi sigur că toate cele 3 opțiuni
+  // sunt vizibile (Alert.alert pe iOS uneori se taie la 4 butoane)
+  const pickFile = () => setSourceSheetVisible(true);
+
+  const pickFromCamera = async () => {
+    try {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) return Alert.alert('Permisiune', 'Acordă acces la cameră.');
+      const result = await ImagePicker.launchCameraAsync({ quality: 0.7 });
+      if (!result.canceled && result.assets?.length) setDocFileFromAsset(result.assets[0]);
+    } catch (e) {
+      Alert.alert('Eroare', 'Nu s-a putut deschide camera.');
+    }
+  };
+  const pickFromGallery = async () => {
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) return Alert.alert('Permisiune', 'Acordă acces la galerie.');
+      const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.7 });
+      if (!result.canceled && result.assets?.length) setDocFileFromAsset(result.assets[0]);
+    } catch (e) {
+      Alert.alert('Eroare', 'Nu s-a putut deschide galeria.');
+    }
+  };
+  const pickDocument = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: '*/*',
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+      if (!result.canceled && result.assets?.length) setDocFileFromAsset(result.assets[0]);
+    } catch (e) {
+      Alert.alert('Eroare', 'Nu s-a putut deschide selectorul de documente. Încearcă din nou sau folosește camera/galeria.');
+    }
+  };
+  const setDocFileFromAsset = (a) => {
+    const name = a.name || a.fileName || a.uri.split('/').pop() || 'fisier';
+    const mimeType = a.mimeType || a.type || 'application/octet-stream';
+    setDocFile({ uri: a.uri, name, mimeType, size: a.size || a.fileSize || 0 });
+    if (!docName) setDocName(name.replace(/\.[^/.]+$/, '')); // strip extension
+  };
+
+  const resetDocForm = () => {
+    setDocName('');
+    setDocFile(null);
+    setDocExpiry('');
+    setDocVehicleId(null);
+    setDocFolderId(null);
+    setDocNotes('');
+  };
+
+  const handleSaveDoc = async () => {
+    if (!docName.trim()) return Alert.alert('Nume', 'Introdu un nume.');
+    if (!docFile) return Alert.alert('Fișier', 'Alege un fișier de încărcat.');
+
+    setAddingDocLoading(true);
+    try {
+      const fd = new FormData();
+      fd.append('name', docName.trim());
+      if (docVehicleId) fd.append('vehicleId', docVehicleId);
+      if (docFolderId) fd.append('folderId', docFolderId);
+      if (docExpiry) fd.append('expiryDate', docExpiry);
+      if (docNotes.trim()) fd.append('notes', docNotes.trim());
+
+      // If folder is system, the type is derived server-side. Otherwise default 'other'.
+      const folder = folders.find(f => f.id === docFolderId);
+      if (folder?.systemType) {
+        fd.append('type', folder.systemType);
+      } else {
+        fd.append('type', 'other');
+      }
+
+      fd.append('file', {
+        uri: docFile.uri,
+        name: docFile.name,
+        type: docFile.mimeType,
+      });
+
+      const saved = await addDocument(fd);
+      setShowAddDoc(false);
+      resetDocForm();
+
+      // Verifică dacă serverul a sugerat actualizarea datei din vehicul
+      if (saved?._suggestedVehicleUpdate) {
+        const s = saved._suggestedVehicleUpdate;
+        setSyncPrompt({
+          docId: saved.id,
+          field: s.field,
+          oldDate: s.oldDate,
+          newDate: s.newDate,
+          vehicleId: docVehicleId,
+          plate: s.vehiclePlate,
+          systemType: s.systemType,
+        });
+      }
+    } catch (e) {
+      Alert.alert('Eroare', e?.response?.data?.error || 'Nu s-a putut salva.');
     } finally {
-      setSaving(false);
+      setAddingDocLoading(false);
     }
   };
 
-  const handleDelete = (id) => {
-    Alert.alert('Ștergere document', 'Ești sigur că vrei să ștergi acest document?', [
-      { text: 'Anulează', style: 'cancel' },
-      {
-        text: 'Șterge',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await deleteDocument(id);
-          } finally {
-            setDetailDoc(null);
-          }
-        },
-      },
-    ]);
+  const confirmSyncDate = async () => {
+    if (!syncPrompt) return;
+    try {
+      await updateVehicle(syncPrompt.vehicleId, {
+        [syncPrompt.field]: syncPrompt.newDate,
+      });
+      Alert.alert('Actualizat', `Data ${VEHICLE_FIELD_LABELS[syncPrompt.field] || syncPrompt.field} a fost actualizată pe ${syncPrompt.plate}.`);
+    } catch (e) {
+      Alert.alert('Eroare', 'Nu s-a putut actualiza vehiculul.');
+    } finally {
+      setSyncPrompt(null);
+    }
   };
 
-  const renderItem = ({ item }) => {
-    const days = item.expiryDate ? daysUntil(item.expiryDate) : null;
+  const handleDeleteDoc = (doc) => {
+    Alert.alert(
+      'Șterge document',
+      `Sigur ștergi "${doc.name}"?`,
+      [
+        { text: 'Anulează', style: 'cancel' },
+        {
+          text: 'Șterge',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteDocument(doc.id);
+              setViewerDoc(null);
+            } catch (e) {
+              Alert.alert('Eroare', 'Nu s-a putut șterge.');
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const handleCreateFolder = async () => {
+    if (!folderName.trim()) return Alert.alert('Nume', 'Introdu un nume pentru folder.');
+    try {
+      await createFolder({
+        name: folderName.trim(),
+        icon: folderIcon,
+        vehicleId: folderVehicleId,
+      });
+      setShowAddFolder(false);
+      setFolderName('');
+      setFolderIcon('📁');
+      setFolderVehicleId(null);
+    } catch (e) {
+      Alert.alert('Eroare', e?.response?.data?.error || 'Nu s-a putut crea folderul.');
+    }
+  };
+
+  const handleDeleteFolder = (folder) => {
+    Alert.alert(
+      'Șterge folder',
+      `Sigur ștergi folderul "${folder.name}"?`,
+      [
+        { text: 'Anulează', style: 'cancel' },
+        {
+          text: 'Șterge',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteFolder(folder.id);
+            } catch (e) {
+              Alert.alert('Eroare', e?.response?.data?.error || 'Nu s-a putut șterge.');
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const renderFolderTile = (folder) => {
+    const count = docsByFolder[folder.id] || 0;
+    const vehiclePlate = folder.vehicleId
+      ? vehicles.find(v => v.id === folder.vehicleId)?.plate
+      : null;
     return (
       <TouchableOpacity
-        onPress={() => setDetailDoc(item)}
+        key={folder.id}
+        style={styles.folderTile}
+        onPress={() => setOpenFolderId(folder.id)}
+        onLongPress={folder.isSystem ? undefined : () => handleDeleteFolder(folder)}
         activeOpacity={0.8}
-        style={[styles.itemWrap, isTablet && { flex: 1 }]}
       >
-        <Card style={styles.itemCard}>
-          <View style={styles.itemRow}>
-            <Text style={styles.itemIcon}>{getIcon(item.type)}</Text>
-            <View style={styles.itemInfo}>
-              <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
-              <Pill style={styles.itemPill}>{item.type || 'Altele'}</Pill>
-              {item.vehicleId ? (
-                <Text style={styles.itemVehicle} numberOfLines={1}>{vehicleName(item.vehicleId)}</Text>
-              ) : null}
-            </View>
-            <View style={styles.itemRight}>
-              {days !== null && <StatusBadge days={days} />}
-              {item.isSigned && (
-                <View style={styles.signedBadge}>
-                  <Text style={styles.signedText}>✓ Semnat</Text>
-                </View>
-              )}
-            </View>
+        <Text style={styles.folderIcon}>{folder.icon || '📁'}</Text>
+        <Text style={styles.folderName} numberOfLines={2}>{folder.name}</Text>
+        <View style={styles.folderMeta}>
+          <Text style={styles.folderCount}>{count} fișier{count !== 1 ? 'e' : ''}</Text>
+          {vehiclePlate && <Text style={styles.folderVehicle}>{vehiclePlate}</Text>}
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  const canDeleteDoc = (doc) => {
+    if (!doc) return false;
+    if (doc.userId === user?.id) return true; // autorul poate șterge
+    if (!doc.vehicleId) return false;
+    const v = vehicles.find(veh => veh.id === doc.vehicleId);
+    return !!v?.isOwner; // owner-ul vehiculului poate șterge orice
+  };
+
+  const renderDocItem = (doc) => {
+    const days = doc.expiryDate ? daysUntil(doc.expiryDate) : null;
+    const isImage = (doc.mimeType || '').startsWith('image/');
+    const fullUrl = doc.fileUrl?.startsWith('http') ? doc.fileUrl : `${apiUrl}${doc.fileUrl || ''}`;
+    const canDelete = canDeleteDoc(doc);
+    return (
+      <TouchableOpacity
+        key={doc.id}
+        style={styles.docRow}
+        onPress={() => setViewerDoc(doc)}
+        onLongPress={canDelete ? () => handleDeleteDoc(doc) : undefined}
+        activeOpacity={0.85}
+      >
+        {isImage && doc.fileUrl ? (
+          <Image source={{ uri: fullUrl }} style={styles.docThumb} />
+        ) : (
+          <View style={styles.docThumbIcon}>
+            <Text style={{ fontSize: 26 }}>{fileIcon(doc)}</Text>
           </View>
-        </Card>
+        )}
+        <View style={{ flex: 1, marginLeft: SPACING.md }}>
+          <Text style={styles.docName} numberOfLines={1}>{doc.name}</Text>
+          {doc.fileName && doc.fileName !== doc.name ? (
+            <Text style={styles.docFile} numberOfLines={1}>{doc.fileName}</Text>
+          ) : null}
+          <View style={styles.docMeta}>
+            <Text style={styles.docMetaText}>{formatSize(doc.fileSize)}</Text>
+            {doc.expiryDate && (
+              <>
+                <Text style={styles.dot}>·</Text>
+                <Text style={styles.docMetaText}>expiră {formatDate(doc.expiryDate)}</Text>
+              </>
+            )}
+          </View>
+        </View>
+        {days !== null && <StatusBadge days={days} />}
       </TouchableOpacity>
     );
   };
 
   if (loading) return <LoadingView />;
 
+  const ownedVehicles = vehicles.filter(v => v.isOwner !== false);
+
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
-      <View style={[styles.header, { paddingHorizontal: hPad }]}>
-        <Text style={styles.headerTitle}>Documentele Mele</Text>
-        <TouchableOpacity
-          style={styles.headerBtn}
-          onPress={() => navigation.navigate('Search')}
-          hitSlop={HIT_SLOP}
-        >
-          <Text style={styles.headerBtnText}>🔍</Text>
-        </TouchableOpacity>
-      </View>
+    <View style={styles.root}>
+      <SafeAreaView style={styles.header} edges={['top']}>
+        <View style={[styles.headerContent, { paddingHorizontal: hPad }]}>
+          {openFolderId ? (
+            <TouchableOpacity onPress={() => setOpenFolderId(null)} hitSlop={HIT_SLOP_LG}>
+              <Text style={styles.headerBack}>← Înapoi</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={{ flex: 1 }} />
+          )}
+          <Text style={styles.headerTitle} numberOfLines={1}>
+            {openFolder ? `${openFolder.icon || '📁'} ${openFolder.name}` : 'Documente'}
+          </Text>
+          <TouchableOpacity
+            onPress={() => navigation.navigate('Search')}
+            hitSlop={HIT_SLOP}
+            style={{ flex: 1, alignItems: 'flex-end' }}
+          >
+            <Text style={styles.headerBtnText}>🔍</Text>
+          </TouchableOpacity>
+        </View>
+
+        {!openFolderId && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={[styles.filterRow, { paddingHorizontal: hPad }]}
+          >
+            <TouchableOpacity
+              onPress={() => setVehicleFilter('all')}
+              style={[styles.filterChip, vehicleFilter === 'all' && styles.filterChipActive]}
+            >
+              <Text style={[styles.filterText, vehicleFilter === 'all' && styles.filterTextActive]}>Toate</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setVehicleFilter('personal')}
+              style={[styles.filterChip, vehicleFilter === 'personal' && styles.filterChipActive]}
+            >
+              <Text style={[styles.filterText, vehicleFilter === 'personal' && styles.filterTextActive]}>👤 Personale</Text>
+            </TouchableOpacity>
+            {vehicles.map(v => (
+              <TouchableOpacity
+                key={v.id}
+                onPress={() => setVehicleFilter(v.id)}
+                style={[styles.filterChip, vehicleFilter === v.id && styles.filterChipActive]}
+              >
+                <Text style={[styles.filterText, vehicleFilter === v.id && styles.filterTextActive]}>
+                  {v.plate}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
+      </SafeAreaView>
 
       <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.filterScroll}
-        contentContainerStyle={[styles.filterContent, { paddingHorizontal: hPad - 4 }]}
-      >
-        {CATEGORIES.map(cat => (
-          <TouchableOpacity
-            key={cat}
-            onPress={() => setActiveCategory(cat)}
-            style={[styles.filterPill, activeCategory === cat && styles.filterPillActive]}
-          >
-            <Text style={[styles.filterText, activeCategory === cat && styles.filterTextActive]}>{cat}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-
-      <FlatList
-        data={filteredDocs}
-        keyExtractor={item => String(item.id)}
-        renderItem={renderItem}
-        numColumns={isTablet ? 2 : 1}
-        key={isTablet ? 'two-col' : 'one-col'}
-        columnWrapperStyle={isTablet ? { gap: SPACING.md, paddingHorizontal: hPad } : undefined}
+        style={{ flex: 1 }}
         contentContainerStyle={[
-          styles.list,
-          { paddingHorizontal: isTablet ? 0 : hPad - 4, paddingBottom: safeBottom + 80 },
+          { paddingHorizontal: hPad, paddingVertical: SPACING.lg, paddingBottom: safeBottom + 80 },
           isTablet && { alignSelf: 'center', width: '100%', maxWidth: maxContentWidth },
         ]}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={T.brand} />
-        }
-        ListEmptyComponent={
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={T.brand} />}
+      >
+        {/* Folders grid (only at root level) */}
+        {!openFolderId && (
+          <>
+            <View style={styles.sectionRow}>
+              <Text style={styles.sectionTitle}>📂 Foldere ({visibleFolders.length})</Text>
+              <TouchableOpacity onPress={() => setShowAddFolder(true)} hitSlop={HIT_SLOP}>
+                <Text style={styles.sectionAction}>+ Folder nou</Text>
+              </TouchableOpacity>
+            </View>
+            {visibleFolders.length === 0 ? (
+              <View style={styles.emptyFolders}>
+                <Text style={{ color: T.ink3 }}>Niciun folder. Adaugă unul cu butonul de mai sus.</Text>
+              </View>
+            ) : (
+              <View style={styles.folderGrid}>
+                {visibleFolders.map(renderFolderTile)}
+              </View>
+            )}
+          </>
+        )}
+
+        {/* Documents */}
+        <View style={[styles.sectionRow, { marginTop: SPACING.xl }]}>
+          <Text style={styles.sectionTitle}>
+            📄 {openFolderId ? 'Documente în folder' : 'Documente fără folder'} ({currentDocs.length})
+          </Text>
+        </View>
+
+        {currentDocs.length === 0 ? (
           <EmptyState
             icon="📂"
-            title="Niciun document"
-            subtitle="Adaugă primul tău document cu butonul +"
+            title={openFolderId ? 'Folderul e gol' : 'Niciun document'}
+            subtitle="Apasă + pentru a adăuga primul document."
           />
-        }
-      />
+        ) : (
+          <View style={{ gap: SPACING.sm }}>
+            {currentDocs.map(renderDocItem)}
+          </View>
+        )}
+      </ScrollView>
 
       <TouchableOpacity
         style={[styles.fab, { bottom: safeBottom, right: hPad }]}
-        onPress={() => setShowAdd(true)}
+        onPress={() => {
+          if (openFolder) {
+            setDocFolderId(openFolder.id);
+            setDocVehicleId(openFolder.vehicleId || null);
+          }
+          setShowAddDoc(true);
+        }}
         activeOpacity={0.85}
       >
         <Text style={styles.fabText}>+</Text>
       </TouchableOpacity>
 
+      {/* Add document modal */}
       <Modal
-        visible={!!detailDoc}
+        visible={showAddDoc}
         animationType="slide"
-        transparent
-        onRequestClose={() => setDetailDoc(null)}
+        presentationStyle="pageSheet"
+        onRequestClose={() => { setShowAddDoc(false); resetDocForm(); }}
       >
-        <View style={styles.overlay}>
-          <View style={styles.modalSheet}>
-            <Text style={styles.modalTitle} numberOfLines={2}>{detailDoc?.name}</Text>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Tip</Text>
-              <Text style={styles.infoValue}>{detailDoc?.type || '—'}</Text>
-            </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Vehicul</Text>
-              <Text style={styles.infoValue}>{detailDoc?.vehicleId ? vehicleName(detailDoc.vehicleId) : '—'}</Text>
-            </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Adăugat</Text>
-              <Text style={styles.infoValue}>{formatDate(detailDoc?.createdAt)}</Text>
-            </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Expiră</Text>
-              <Text style={styles.infoValue}>{formatDate(detailDoc?.expiryDate)}</Text>
-            </View>
-            <View style={styles.modalActions}>
-              {!detailDoc?.isSigned && (
-                <PrimaryButton
-                  title="✍️ Semnează"
-                  onPress={() => {
-                    const id = detailDoc.id;
-                    setDetailDoc(null);
-                    navigation.navigate('Signature', { documentId: id });
-                  }}
-                />
-              )}
-              <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDelete(detailDoc?.id)}>
-                <Text style={styles.deleteBtnText}>🗑️ Șterge</Text>
+        <SafeAreaView style={styles.modalSafe}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={{ flex: 1 }}
+          >
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Document nou</Text>
+              <TouchableOpacity onPress={() => { setShowAddDoc(false); resetDocForm(); }} hitSlop={HIT_SLOP}>
+                <Text style={styles.modalClose}>✕</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.closeBtn} onPress={() => setDetailDoc(null)}>
-                <Text style={styles.closeBtnText}>✕ Închide</Text>
+            </View>
+            <ScrollView contentContainerStyle={styles.modalContent} keyboardShouldPersistTaps="handled">
+              <Text style={styles.label}>Nume document *</Text>
+              <TextInput
+                style={styles.input}
+                value={docName}
+                onChangeText={setDocName}
+                placeholder='Ex: "RCA 2026"'
+                placeholderTextColor={T.ink4}
+              />
+
+              <TouchableOpacity
+                style={[styles.pickFileBtn, docFile && styles.pickFileBtnActive]}
+                onPress={pickFile}
+                activeOpacity={0.7}
+              >
+                {docFile ? (
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.pickFileText}>📎 {docFile.name}</Text>
+                    <Text style={styles.pickFileSub}>{formatSize(docFile.size)} · {docFile.mimeType}</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.pickFileText}>📎 Alege un fișier (foto, PDF, Word, Excel, etc.)</Text>
+                )}
+                <Text style={styles.pickFileChev}>›</Text>
+              </TouchableOpacity>
+
+              <Text style={styles.label}>Vehicul (opțional)</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
+                <TouchableOpacity
+                  style={[styles.chip, !docVehicleId && styles.chipActive]}
+                  onPress={() => { setDocVehicleId(null); setDocFolderId(null); }}
+                >
+                  <Text style={[styles.chipText, !docVehicleId && styles.chipTextActive]}>Fără vehicul</Text>
+                </TouchableOpacity>
+                {vehicles.map(v => (
+                  <TouchableOpacity
+                    key={v.id}
+                    style={[styles.chip, docVehicleId === v.id && styles.chipActive]}
+                    onPress={() => { setDocVehicleId(v.id); setDocFolderId(null); }}
+                  >
+                    <Text style={[styles.chipText, docVehicleId === v.id && styles.chipTextActive]}>{v.plate}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              <Text style={styles.label}>Folder</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
+                {folders
+                  .filter(f => (docVehicleId ? f.vehicleId === docVehicleId : !f.vehicleId))
+                  .map(f => (
+                    <TouchableOpacity
+                      key={f.id}
+                      style={[styles.chip, docFolderId === f.id && styles.chipActive]}
+                      onPress={() => setDocFolderId(f.id)}
+                    >
+                      <Text style={[styles.chipText, docFolderId === f.id && styles.chipTextActive]}>
+                        {f.icon} {f.name}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+              </ScrollView>
+
+              <DateField
+                label="Data expirării (opțional)"
+                value={docExpiry}
+                onChange={setDocExpiry}
+                showRelative
+                hint='Pentru RCA, ITP, etc., te voi întreba dacă vrei să se actualizeze și data din detaliile vehiculului.'
+              />
+
+              <Text style={styles.label}>Notițe (opțional)</Text>
+              <TextInput
+                style={[styles.input, { minHeight: 70, textAlignVertical: 'top' }]}
+                value={docNotes}
+                onChangeText={setDocNotes}
+                placeholder="Detalii suplimentare"
+                placeholderTextColor={T.ink4}
+                multiline
+              />
+
+              <PrimaryButton
+                title="💾 Salvează document"
+                onPress={handleSaveDoc}
+                loading={addingDocLoading}
+                style={{ marginTop: SPACING.xl }}
+              />
+              <View style={{ height: 40 }} />
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
+      </Modal>
+
+      {/* Add folder modal */}
+      <Modal
+        visible={showAddFolder}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowAddFolder(false)}
+      >
+        <SafeAreaView style={styles.modalSafe}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Folder nou</Text>
+            <TouchableOpacity onPress={() => setShowAddFolder(false)} hitSlop={HIT_SLOP}>
+              <Text style={styles.modalClose}>✕</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView contentContainerStyle={styles.modalContent}>
+            <Text style={styles.label}>Nume folder *</Text>
+            <TextInput
+              style={styles.input}
+              value={folderName}
+              onChangeText={setFolderName}
+              placeholder='Ex: "Acte revizii 2026"'
+              placeholderTextColor={T.ink4}
+            />
+
+            <Text style={styles.label}>Iconiță</Text>
+            <View style={styles.iconGrid}>
+              {EMOJI_OPTIONS.map(emoji => (
+                <TouchableOpacity
+                  key={emoji}
+                  style={[styles.iconChoice, folderIcon === emoji && styles.iconChoiceActive]}
+                  onPress={() => setFolderIcon(emoji)}
+                >
+                  <Text style={{ fontSize: 22 }}>{emoji}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={styles.label}>Pentru vehicul (opțional)</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
+              <TouchableOpacity
+                style={[styles.chip, !folderVehicleId && styles.chipActive]}
+                onPress={() => setFolderVehicleId(null)}
+              >
+                <Text style={[styles.chipText, !folderVehicleId && styles.chipTextActive]}>👤 Personal</Text>
+              </TouchableOpacity>
+              {ownedVehicles.map(v => (
+                <TouchableOpacity
+                  key={v.id}
+                  style={[styles.chip, folderVehicleId === v.id && styles.chipActive]}
+                  onPress={() => setFolderVehicleId(v.id)}
+                >
+                  <Text style={[styles.chipText, folderVehicleId === v.id && styles.chipTextActive]}>{v.plate}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            <PrimaryButton title="Creează folder" onPress={handleCreateFolder} style={{ marginTop: SPACING.xl }} />
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+
+      {/* Sync prompt */}
+      <Modal
+        visible={!!syncPrompt}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSyncPrompt(null)}
+      >
+        <View style={styles.promptBackdrop}>
+          <View style={styles.promptCard}>
+            <Text style={styles.promptIcon}>🔄</Text>
+            <Text style={styles.promptTitle}>Actualizezi datele vehiculului?</Text>
+            <Text style={styles.promptBody}>
+              Documentul are data de expirare <Text style={{ fontWeight: FONTS.bold }}>{formatDate(syncPrompt?.newDate)}</Text>,
+              {' '}mai târzie decât data {VEHICLE_FIELD_LABELS[syncPrompt?.field] || syncPrompt?.field} din detaliile vehiculului{' '}
+              <Text style={{ fontWeight: FONTS.bold }}>{syncPrompt?.plate}</Text>
+              {syncPrompt?.oldDate ? ` (${formatDate(syncPrompt.oldDate)})` : ' (nesetată)'}.
+              {'\n\n'}Vrei să o actualizez automat?
+            </Text>
+            <View style={styles.promptActions}>
+              <TouchableOpacity style={styles.promptBtnSecondary} onPress={() => setSyncPrompt(null)}>
+                <Text style={styles.promptBtnSecondaryText}>Nu acum</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.promptBtnPrimary} onPress={confirmSyncDate}>
+                <Text style={styles.promptBtnPrimaryText}>Actualizează</Text>
               </TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
 
-      <Modal
-        visible={showAdd}
-        animationType="slide"
-        transparent
-        onRequestClose={() => { setShowAdd(false); resetForm(); }}
-      >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.overlay}
-        >
-          <ScrollView
-            style={styles.modalSheetScroll}
-            contentContainerStyle={styles.modalSheetContent}
-            keyboardShouldPersistTaps="handled"
-          >
-            <Text style={styles.modalTitle}>Adaugă Document</Text>
+      <AttachmentViewer
+        visible={!!viewerDoc}
+        attachment={viewerDoc}
+        onClose={() => setViewerDoc(null)}
+        canDelete={canDeleteDoc(viewerDoc)}
+        onDelete={(doc) => handleDeleteDoc(doc)}
+      />
 
-            <Text style={styles.fieldLabel}>Nume document</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Ex: RCA 2025"
-              placeholderTextColor={T.ink4}
-              value={formName}
-              onChangeText={setFormName}
-            />
-
-            <Text style={styles.fieldLabel}>Tip</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
-              {DOC_TYPES.map(t => (
-                <TouchableOpacity
-                  key={t}
-                  onPress={() => setFormType(t)}
-                  style={[styles.chip, formType === t && styles.chipActive]}
-                >
-                  <Text style={[styles.chipText, formType === t && styles.chipTextActive]}>{t}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-
-            <Text style={styles.fieldLabel}>Vehicul (opțional)</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
-              <TouchableOpacity
-                onPress={() => setFormVehicleId('')}
-                style={[styles.chip, formVehicleId === '' && styles.chipActive]}
-              >
-                <Text style={[styles.chipText, formVehicleId === '' && styles.chipTextActive]}>Fără vehicul</Text>
-              </TouchableOpacity>
-              {vehicles.map(v => (
-                <TouchableOpacity
-                  key={v.id}
-                  onPress={() => setFormVehicleId(v.id)}
-                  style={[styles.chip, formVehicleId === v.id && styles.chipActive]}
-                >
-                  <Text style={[styles.chipText, formVehicleId === v.id && styles.chipTextActive]}>{v.plate}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-
-            <DateField
-              label="Data expirare (opțional)"
-              value={formExpiry}
-              onChange={setFormExpiry}
-              showRelative
-            />
-
-            <TouchableOpacity style={styles.attachBtn} onPress={pickImage}>
-              <Text style={styles.attachText}>
-                {formImage ? `📎 ${formImage.uri.split('/').pop()}` : '📎 Atașează fișier'}
-              </Text>
-            </TouchableOpacity>
-
-            <View style={styles.modalActions}>
-              <PrimaryButton title="Salvează" onPress={handleSave} loading={saving} />
-              <TouchableOpacity
-                style={styles.closeBtn}
-                onPress={() => { setShowAdd(false); resetForm(); }}
-              >
-                <Text style={styles.closeBtnText}>✕ Anulează</Text>
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
-      </Modal>
-    </SafeAreaView>
+      <SourcePickerSheet
+        visible={sourceSheetVisible}
+        onClose={() => setSourceSheetVisible(false)}
+        title="Adaugă fișier"
+        options={[
+          {
+            key: 'camera',
+            icon: '📷',
+            label: 'Fă o fotografie',
+            sub: 'Folosește camera pentru a scana un document',
+            onPress: pickFromCamera,
+          },
+          {
+            key: 'gallery',
+            icon: '🖼',
+            label: 'Alege din galerie',
+            sub: 'Selectează o imagine deja existentă',
+            onPress: pickFromGallery,
+          },
+          {
+            key: 'document',
+            icon: '📄',
+            label: 'Caută un document',
+            sub: 'PDF, Word, Excel, txt și orice alt tip de fișier',
+            onPress: pickDocument,
+          },
+        ]}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: T.bg },
-  header: {
+  root: { flex: 1, backgroundColor: T.bg },
+  header: { backgroundColor: T.brand },
+  headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 14,
+    paddingTop: SPACING.sm,
+    paddingBottom: SPACING.sm,
+    minHeight: TOUCH_TARGET,
+    gap: SPACING.sm,
   },
-  headerTitle: { fontSize: 22, fontWeight: FONTS.bold, color: T.ink },
-  headerBtn: {
-    width: TOUCH_TARGET,
-    height: TOUCH_TARGET,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: T.card,
+  headerBack: { color: '#fff', fontSize: 14, fontWeight: FONTS.medium, flex: 1 },
+  headerTitle: { flex: 2, color: '#fff', fontSize: 17, fontWeight: FONTS.bold, textAlign: 'center' },
+  headerBtnText: { color: '#fff', fontSize: 18 },
+  filterRow: { gap: SPACING.sm, paddingBottom: SPACING.sm },
+  filterChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
     borderRadius: RADIUS.full,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+  },
+  filterChipActive: { backgroundColor: '#fff' },
+  filterText: { color: '#fff', fontSize: 13, fontWeight: FONTS.medium },
+  filterTextActive: { color: T.brand, fontWeight: FONTS.bold },
+
+  sectionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: SPACING.md },
+  sectionTitle: { fontSize: 14, fontWeight: FONTS.bold, color: T.ink2, letterSpacing: 0.5 },
+  sectionAction: { fontSize: 13, color: T.brand, fontWeight: FONTS.semibold },
+
+  emptyFolders: { padding: SPACING.lg, alignItems: 'center' },
+  folderGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.md },
+  folderTile: {
+    width: '47%',
+    backgroundColor: T.card,
+    borderRadius: RADIUS.lg,
+    padding: SPACING.md,
+    ...SHADOW.sm,
+    minHeight: 110,
+  },
+  folderIcon: { fontSize: 32, marginBottom: 4 },
+  folderName: { fontSize: 14, fontWeight: FONTS.bold, color: T.ink, marginBottom: 4 },
+  folderMeta: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 4 },
+  folderCount: { fontSize: 11, color: T.ink3 },
+  folderVehicle: {
+    fontSize: 10,
+    color: T.brand,
+    fontWeight: FONTS.semibold,
+    backgroundColor: T.brandTint,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: RADIUS.full,
+  },
+
+  docRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: T.card,
+    borderRadius: RADIUS.lg,
+    padding: SPACING.md,
     ...SHADOW.sm,
   },
-  headerBtnText: { fontSize: 18 },
-  filterScroll: { maxHeight: 52 },
-  filterContent: { paddingHorizontal: 16, paddingVertical: 8, flexDirection: 'row' },
-  filterPill: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: RADIUS.full,
-    backgroundColor: T.card,
-    borderWidth: 1,
-    borderColor: T.line,
-    marginRight: 8,
+  docThumb: { width: 52, height: 52, borderRadius: RADIUS.md, backgroundColor: T.line2 },
+  docThumbIcon: {
+    width: 52, height: 52, borderRadius: RADIUS.md, backgroundColor: T.brandTint,
+    alignItems: 'center', justifyContent: 'center',
   },
-  filterPillActive: { backgroundColor: T.brand, borderColor: T.brand },
-  filterText: { fontSize: 14, fontWeight: FONTS.medium, color: T.ink2 },
-  filterTextActive: { color: '#fff' },
-  list: { paddingHorizontal: 16, paddingBottom: 100, paddingTop: 8 },
-  itemWrap: { marginBottom: 10 },
-  itemCard: { padding: 14 },
-  itemRow: { flexDirection: 'row', alignItems: 'center' },
-  itemIcon: { fontSize: 28, width: 40, textAlign: 'center', marginRight: 12 },
-  itemInfo: { flex: 1 },
-  itemName: { fontSize: 15, fontWeight: FONTS.semibold, color: T.ink, marginBottom: 4 },
-  itemPill: { alignSelf: 'flex-start', marginBottom: 4 },
-  itemVehicle: { fontSize: 12, color: T.ink3 },
-  itemRight: { alignItems: 'flex-end', marginLeft: 8 },
-  signedBadge: {
-    backgroundColor: T.successTint,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: RADIUS.full,
-    marginTop: 4,
-  },
-  signedText: { fontSize: 11, fontWeight: FONTS.semibold, color: T.success },
+  docName: { fontSize: 15, fontWeight: FONTS.semibold, color: T.ink },
+  docFile: { fontSize: 11, color: T.ink4, marginTop: 1 },
+  docMeta: { flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 4 },
+  docMetaText: { fontSize: 11, color: T.ink3 },
+  dot: { fontSize: 11, color: T.ink4 },
+
   fab: {
     position: 'absolute',
-    width: 56,
-    height: 56,
-    borderRadius: RADIUS.full,
-    backgroundColor: T.brand,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...SHADOW.lg,
+    width: 56, height: 56, borderRadius: RADIUS.full,
+    backgroundColor: T.brand, alignItems: 'center', justifyContent: 'center', ...SHADOW.lg,
   },
-  fabText: { fontSize: 30, color: '#fff', lineHeight: 34, marginTop: -2 },
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
-  modalSheet: {
-    backgroundColor: T.card,
-    borderTopLeftRadius: RADIUS.xl,
-    borderTopRightRadius: RADIUS.xl,
-    padding: 24,
-    paddingBottom: 36,
+  fabText: { color: '#fff', fontSize: 30, lineHeight: 34, fontWeight: FONTS.light, marginTop: -2 },
+
+  // Modal
+  modalSafe: { flex: 1, backgroundColor: T.bg },
+  modalHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: SPACING.xl, paddingVertical: SPACING.lg,
+    borderBottomWidth: 1, borderBottomColor: T.line, backgroundColor: T.card,
   },
-  modalSheetScroll: {
-    backgroundColor: T.card,
-    borderTopLeftRadius: RADIUS.xl,
-    borderTopRightRadius: RADIUS.xl,
-    maxHeight: '90%',
-  },
-  modalSheetContent: { padding: 24, paddingBottom: 36 },
-  modalTitle: { fontSize: 20, fontWeight: FONTS.bold, color: T.ink, marginBottom: 16 },
-  infoRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: T.line,
-  },
-  infoLabel: { fontSize: 14, color: T.ink3, fontWeight: FONTS.medium },
-  infoValue: { fontSize: 14, color: T.ink, fontWeight: FONTS.semibold, maxWidth: '60%', textAlign: 'right' },
-  modalActions: { marginTop: 20, gap: 10 },
-  deleteBtn: {
-    backgroundColor: T.dangerTint,
-    borderRadius: RADIUS.md,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  deleteBtnText: { color: T.danger, fontSize: 16, fontWeight: FONTS.semibold },
-  closeBtn: {
-    backgroundColor: T.line2,
-    borderRadius: RADIUS.md,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  closeBtnText: { color: T.ink2, fontSize: 16, fontWeight: FONTS.semibold },
-  fieldLabel: { fontSize: 13, fontWeight: FONTS.semibold, color: T.ink3, marginBottom: 6, marginTop: 16 },
+  modalTitle: { fontSize: 17, fontWeight: FONTS.bold, color: T.ink },
+  modalClose: { fontSize: 20, color: T.ink3, padding: 4 },
+  modalContent: { padding: SPACING.xl, gap: SPACING.sm },
+  label: { fontSize: 13, fontWeight: FONTS.semibold, color: T.ink2, marginTop: SPACING.md, marginBottom: 6 },
   input: {
-    backgroundColor: T.line2,
-    borderRadius: RADIUS.md,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 15,
-    color: T.ink,
-    borderWidth: 1,
-    borderColor: T.line,
+    borderWidth: 1.5, borderColor: T.line, backgroundColor: T.bgSoft,
+    borderRadius: RADIUS.md, paddingHorizontal: SPACING.md, paddingVertical: 12,
+    fontSize: 15, color: T.ink, minHeight: 46,
   },
-  chipRow: { marginBottom: 4 },
+  pickFileBtn: {
+    marginTop: SPACING.md,
+    flexDirection: 'row', alignItems: 'center', gap: SPACING.md,
+    borderWidth: 1.5, borderStyle: 'dashed', borderColor: T.line,
+    backgroundColor: T.bgSoft,
+    borderRadius: RADIUS.md, padding: SPACING.md,
+    minHeight: 60,
+  },
+  pickFileBtnActive: {
+    borderStyle: 'solid',
+    borderColor: T.brand,
+    backgroundColor: T.brandTint,
+  },
+  pickFileText: { fontSize: 14, color: T.ink, fontWeight: FONTS.semibold },
+  pickFileSub: { fontSize: 11, color: T.ink3, marginTop: 2 },
+  pickFileChev: { fontSize: 22, color: T.ink4 },
+  chipRow: { paddingVertical: SPACING.sm, gap: 6 },
   chip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: RADIUS.full,
-    backgroundColor: T.line2,
-    borderWidth: 1,
-    borderColor: T.line,
-    marginRight: 8,
+    paddingHorizontal: 14, paddingVertical: 8,
+    borderRadius: RADIUS.full, backgroundColor: T.bgSoft,
+    borderWidth: 1.5, borderColor: T.line, marginRight: 6,
   },
   chipActive: { backgroundColor: T.brand, borderColor: T.brand },
   chipText: { fontSize: 13, fontWeight: FONTS.medium, color: T.ink2 },
-  chipTextActive: { color: '#fff' },
-  attachBtn: {
-    marginTop: 14,
-    backgroundColor: T.brandTint,
-    borderRadius: RADIUS.md,
-    paddingVertical: 12,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: T.brand + '50',
+  chipTextActive: { color: '#fff', fontWeight: FONTS.bold },
+  iconGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
+  iconChoice: {
+    width: 44, height: 44, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: T.bgSoft, borderRadius: RADIUS.md,
+    borderWidth: 1.5, borderColor: T.line,
   },
-  attachText: { color: T.brand, fontSize: 14, fontWeight: FONTS.semibold },
+  iconChoiceActive: { borderColor: T.brand, backgroundColor: T.brandTint },
+
+  // Sync prompt
+  promptBackdrop: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center', justifyContent: 'center',
+    paddingHorizontal: SPACING.xl,
+  },
+  promptCard: {
+    backgroundColor: T.card, borderRadius: RADIUS.xl, padding: SPACING.xl,
+    alignItems: 'center', ...SHADOW.lg, maxWidth: 380, width: '100%',
+  },
+  promptIcon: { fontSize: 48, marginBottom: SPACING.md },
+  promptTitle: { fontSize: 17, fontWeight: FONTS.bold, color: T.ink, marginBottom: SPACING.sm, textAlign: 'center' },
+  promptBody: { fontSize: 14, color: T.ink2, textAlign: 'center', lineHeight: 20 },
+  promptActions: { flexDirection: 'row', gap: SPACING.md, marginTop: SPACING.xl, width: '100%' },
+  promptBtnSecondary: {
+    flex: 1, paddingVertical: 14, backgroundColor: T.line2,
+    borderRadius: RADIUS.md, alignItems: 'center',
+  },
+  promptBtnSecondaryText: { color: T.ink2, fontWeight: FONTS.semibold, fontSize: 14 },
+  promptBtnPrimary: {
+    flex: 1, paddingVertical: 14, backgroundColor: T.brand,
+    borderRadius: RADIUS.md, alignItems: 'center',
+  },
+  promptBtnPrimaryText: { color: '#fff', fontWeight: FONTS.bold, fontSize: 14 },
 });

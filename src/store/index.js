@@ -200,12 +200,19 @@ const useStore = create((set, get) => ({
   pendingFriends: [],
   sentFriends: [],
   vehicleMembersById: {},
+  folders: [],
+  selectedVehicleId: null,
   quickActionIds: DEFAULT_QUICK_ACTION_IDS,
   isLoading: false,
   isOnline: true,
   isSyncing: false,
   pendingCount: 0,
   error: null,
+
+  setSelectedVehicle: (id) => {
+    set({ selectedVehicleId: id || null });
+    saveCache('selectedVehicleId', id || null).catch(() => {});
+  },
 
   setOnline: (isOnline) => set({ isOnline }),
   setLoading: (isLoading) => set({ isLoading }),
@@ -406,7 +413,7 @@ const useStore = create((set, get) => ({
         // Load cached data immediately so offline-only items are visible
         // until fetch/sync runs. Otherwise the UI starts empty and any
         // unsynced records can appear "lost" on the next online refresh.
-        const [vehicles, invoices, fuelLogs, reminders, documents, notifications, members] = await Promise.all([
+        const [vehicles, invoices, fuelLogs, reminders, documents, notifications, members, selectedVehicleId] = await Promise.all([
           loadCache('vehicles'),
           loadCache('invoices'),
           loadCache('fuel'),
@@ -414,6 +421,7 @@ const useStore = create((set, get) => ({
           loadCache('documents'),
           loadCache('notifications'),
           loadCache('vehicleMembersById'),
+          loadCache('selectedVehicleId'),
         ]);
         set({
           vehicles: vehicles || [],
@@ -423,6 +431,7 @@ const useStore = create((set, get) => ({
           documents: documents || [],
           notifications: notifications || [],
           vehicleMembersById: members || {},
+          selectedVehicleId: selectedVehicleId || null,
         });
 
         const queue = await getQueue();
@@ -954,6 +963,61 @@ const useStore = create((set, get) => ({
     }
 
     await api.delete(`/documents/${id}`);
+  },
+
+  updateDocument: async (id, formData) => {
+    const { data } = await api.put(`/documents/${id}`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    set(s => ({ documents: s.documents.map(d => d.id === id ? data : d) }));
+    await saveCache('documents', get().documents);
+    return data;
+  },
+
+  // ── Folders ────────────────────────────────────────────────────────────────
+  fetchFolders: async (vehicleId) => {
+    try {
+      const params = vehicleId ? { vehicleId } : {};
+      const { data } = await api.get('/folders', { params });
+      if (vehicleId) {
+        // Replace only folders for this vehicle in the global list
+        set(s => ({
+          folders: [
+            ...s.folders.filter(f => f.vehicleId !== vehicleId),
+            ...data,
+          ],
+        }));
+      } else {
+        set({ folders: data });
+        await saveCache('folders', data);
+      }
+      return data;
+    } catch (e) {
+      const cached = await loadCache('folders');
+      if (cached && !vehicleId) set({ folders: cached });
+      return [];
+    }
+  },
+
+  createFolder: async (payload) => {
+    const clientId = createClientId('folder');
+    const { data } = await api.post('/folders', { ...payload, clientId });
+    set(s => ({ folders: [...s.folders, data] }));
+    await saveCache('folders', get().folders);
+    return data;
+  },
+
+  updateFolder: async (id, patch) => {
+    const { data } = await api.put(`/folders/${id}`, patch);
+    set(s => ({ folders: s.folders.map(f => f.id === id ? data : f) }));
+    await saveCache('folders', get().folders);
+    return data;
+  },
+
+  deleteFolder: async (id) => {
+    await api.delete(`/folders/${id}`);
+    set(s => ({ folders: s.folders.filter(f => f.id !== id) }));
+    await saveCache('folders', get().folders);
   },
 
   // ── Invoices ────────────────────────────────────────────────────────────────

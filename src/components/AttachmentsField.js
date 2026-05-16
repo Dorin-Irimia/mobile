@@ -12,6 +12,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { T, RADIUS, FONTS, SPACING, TOUCH_TARGET, HIT_SLOP } from '../theme';
 import { getApiUrl } from '../api/client';
+import SourcePickerSheet from './SourcePickerSheet';
 
 function fileIcon(kind, mime) {
   if (kind === 'image' || (mime || '').startsWith('image/')) return '🖼️';
@@ -42,6 +43,7 @@ export default function AttachmentsField({
   disabled,
 }) {
   const [loading, setLoading] = useState(false);
+  const [sourceSheetVisible, setSourceSheetVisible] = useState(false);
   const apiUrl = getApiUrl();
 
   const totalCount = existing.length + selected.length;
@@ -58,23 +60,16 @@ export default function AttachmentsField({
     onSelectedChange([...selected, ...mapped]);
   };
 
-  const showSourcePicker = () => {
-    Alert.alert('Adaugă fișier', 'Alege sursa', [
-      { text: 'Anulează', style: 'cancel' },
-      { text: '📷 Cameră', onPress: pickFromCamera },
-      { text: '🖼 Galerie', onPress: pickFromGallery },
-      { text: '📄 Document (PDF, doc)', onPress: pickDocument },
-    ]);
-  };
+  const showSourcePicker = () => setSourceSheetVisible(true);
 
   const pickFromCamera = async () => {
-    const perm = await ImagePicker.requestCameraPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert('Permisiune', 'Acordă acces la cameră în setări.');
-      return;
-    }
-    setLoading(true);
     try {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('Permisiune', 'Acordă acces la cameră în setări.');
+        return;
+      }
+      setLoading(true);
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         quality: 0.7,
@@ -82,19 +77,21 @@ export default function AttachmentsField({
       if (!result.canceled && result.assets?.length) {
         addAssets(result.assets);
       }
+    } catch (e) {
+      Alert.alert('Eroare', 'Nu s-a putut deschide camera.');
     } finally {
       setLoading(false);
     }
   };
 
   const pickFromGallery = async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert('Permisiune', 'Acordă acces la galerie în setări.');
-      return;
-    }
-    setLoading(true);
     try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('Permisiune', 'Acordă acces la galerie în setări.');
+        return;
+      }
+      setLoading(true);
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsMultipleSelection: true,
@@ -104,6 +101,8 @@ export default function AttachmentsField({
       if (!result.canceled && result.assets?.length) {
         addAssets(result.assets);
       }
+    } catch (e) {
+      Alert.alert('Eroare', 'Nu s-a putut deschide galeria.');
     } finally {
       setLoading(false);
     }
@@ -113,13 +112,15 @@ export default function AttachmentsField({
     setLoading(true);
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'image/*'],
+        type: '*/*',
         multiple: true,
         copyToCacheDirectory: true,
       });
       if (!result.canceled && result.assets?.length) {
         addAssets(result.assets);
       }
+    } catch (e) {
+      Alert.alert('Eroare', 'Nu s-a putut deschide selectorul de documente.');
     } finally {
       setLoading(false);
     }
@@ -229,6 +230,35 @@ export default function AttachmentsField({
           {selected.map(renderSelectedItem)}
         </View>
       )}
+
+      <SourcePickerSheet
+        visible={sourceSheetVisible}
+        onClose={() => setSourceSheetVisible(false)}
+        title="Adaugă fișier"
+        options={[
+          {
+            key: 'camera',
+            icon: '📷',
+            label: 'Fă o fotografie',
+            sub: 'Folosește camera',
+            onPress: pickFromCamera,
+          },
+          {
+            key: 'gallery',
+            icon: '🖼',
+            label: 'Alege din galerie',
+            sub: 'Una sau mai multe imagini',
+            onPress: pickFromGallery,
+          },
+          {
+            key: 'document',
+            icon: '📄',
+            label: 'Caută un document',
+            sub: 'PDF, Word, Excel sau orice fișier',
+            onPress: pickDocument,
+          },
+        ]}
+      />
     </View>
   );
 }

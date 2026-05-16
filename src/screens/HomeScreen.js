@@ -182,7 +182,11 @@ export default function HomeScreen({ navigation }) {
     hPad,
   );
 
-  const [selectedVehicleId, setSelectedVehicleId] = useState(null);
+  const selectedVehicleIdGlobal = useStore(s => s.selectedVehicleId);
+  const setSelectedVehicleGlobal = useStore(s => s.setSelectedVehicle);
+  const selectedVehicleId = selectedVehicleIdGlobal;
+  const setSelectedVehicleId = setSelectedVehicleGlobal;
+
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const lastVehicleTap = useRef({ id: null, at: 0 });

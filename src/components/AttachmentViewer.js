@@ -17,7 +17,7 @@ import * as Sharing from 'expo-sharing';
 import { T, RADIUS, FONTS, SPACING, HIT_SLOP, TOUCH_TARGET } from '../theme';
 import { getApiUrl } from '../api/client';
 
-export default function AttachmentViewer({ visible, attachment, onClose }) {
+export default function AttachmentViewer({ visible, attachment, onClose, onDelete, canDelete }) {
   const [busy, setBusy] = useState(false);
   if (!attachment) return null;
 
@@ -131,6 +131,28 @@ export default function AttachmentViewer({ visible, attachment, onClose }) {
               {busy ? 'Se descarcă…' : '💾 Salvează / Trimite mai departe'}
             </Text>
           </TouchableOpacity>
+          {canDelete && onDelete && (
+            <TouchableOpacity
+              style={styles.deleteBtn}
+              onPress={() => {
+                Alert.alert(
+                  'Șterge fișierul',
+                  'Această acțiune e definitivă.',
+                  [
+                    { text: 'Anulează', style: 'cancel' },
+                    {
+                      text: 'Șterge',
+                      style: 'destructive',
+                      onPress: () => { onClose(); setTimeout(() => onDelete(attachment), 200); },
+                    },
+                  ],
+                );
+              }}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.deleteBtnText}>🗑️ Șterge</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </SafeAreaView>
     </Modal>
@@ -201,4 +223,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   footerBtnText: { color: '#fff', fontSize: 15, fontWeight: FONTS.bold },
+  deleteBtn: {
+    backgroundColor: T.dangerTint,
+    borderWidth: 1.5,
+    borderColor: T.danger,
+    height: 50,
+    borderRadius: RADIUS.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: SPACING.sm,
+  },
+  deleteBtnText: { color: T.danger, fontSize: 15, fontWeight: FONTS.bold },
 });
