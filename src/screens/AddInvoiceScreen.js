@@ -29,6 +29,8 @@ import {
 import AttachmentsField from '../components/AttachmentsField';
 import CustomFieldsEditor from '../components/CustomFieldsEditor';
 import LocationField from '../components/LocationField';
+import DateField from '../components/DateField';
+import TimeField from '../components/TimeField';
 
 const CATEGORIES = [
   { key: 'service', label: '🔧 Service' },
@@ -264,32 +266,18 @@ export default function AddInvoiceScreen({ navigation, route }) {
 
           {/* Data, ora, km */}
           <View style={styles.card}>
-            <View style={styles.row2}>
-              <View style={{ flex: 1.4 }}>
-                <Text style={styles.label}>Data *</Text>
-                <TextInput
-                  style={styles.input}
-                  value={date}
-                  onChangeText={setDate}
-                  placeholder="YYYY-MM-DD"
-                  placeholderTextColor={T.ink4}
-                  keyboardType="numbers-and-punctuation"
-                />
-                <Text style={styles.hint}>{formatDate(date)}</Text>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.label}>Ora</Text>
-                <TextInput
-                  style={styles.input}
-                  value={time}
-                  onChangeText={setTime}
-                  placeholder="HH:mm"
-                  placeholderTextColor={T.ink4}
-                  keyboardType="numbers-and-punctuation"
-                />
-                <Text style={styles.hint}>opțional</Text>
-              </View>
-            </View>
+            <DateField
+              label="Data *"
+              value={date}
+              onChange={setDate}
+              maxDate={new Date()}
+              required
+            />
+            <TimeField
+              label="Ora (opțional)"
+              value={time}
+              onChange={setTime}
+            />
 
             <Text style={styles.label}>Kilometraj la momentul cheltuielii</Text>
             <View style={styles.inputWithSuffix}>

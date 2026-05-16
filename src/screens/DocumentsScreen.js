@@ -31,6 +31,7 @@ import {
   IS_IOS,
 } from '../theme';
 import { Card, Pill, PrimaryButton, EmptyState, LoadingView, StatusBadge } from '../components/ui';
+import DateField from '../components/DateField';
 
 const CATEGORIES = ['Toate', 'Talon', 'RCA', 'CASCO', 'ITP', 'Factură', 'Garanție'];
 
@@ -376,14 +377,11 @@ export default function DocumentsScreen({ navigation }) {
               ))}
             </ScrollView>
 
-            <Text style={styles.fieldLabel}>Data expirare (YYYY-MM-DD, opțional)</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="2026-01-31"
-              placeholderTextColor={T.ink4}
+            <DateField
+              label="Data expirare (opțional)"
               value={formExpiry}
-              onChangeText={setFormExpiry}
-              keyboardType="numbers-and-punctuation"
+              onChange={setFormExpiry}
+              showRelative
             />
 
             <TouchableOpacity style={styles.attachBtn} onPress={pickImage}>

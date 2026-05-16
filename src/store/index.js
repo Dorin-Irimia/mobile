@@ -88,6 +88,28 @@ function parseCustomFields(value, fallback = null) {
   }
 }
 
+async function mergeWithOfflineQueue(serverList = [], localList = [], entity) {
+  if (!Array.isArray(serverList)) return localList || [];
+  const queue = await getQueue();
+  const serverClientIds = new Set(serverList.map(i => i.clientId).filter(Boolean));
+  const serverIds = new Set(serverList.map(i => i.id));
+  const pendingClientIds = new Set(
+    queue
+      .filter(op => op.entity === entity && op.action === 'create')
+      .map(op => op.localId || op.clientId)
+      .filter(Boolean),
+  );
+  const preservedLocal = (localList || []).filter(item => {
+    if (!item || !item._offline) return false;
+    if (serverIds.has(item.id)) return false;
+    const cid = item.clientId || item.id;
+    if (cid && serverClientIds.has(cid)) return false;
+    if (cid && !pendingClientIds.has(cid)) return false;
+    return true;
+  });
+  return [...preservedLocal, ...serverList];
+}
+
 function optimisticAttachments(files) {
   return (files || []).map((file, index) => ({
     id: createClientId('att'),
@@ -209,22 +231,34 @@ const useStore = create((set, get) => ({
       await saveAuth('user', data.user);
       setStorageScope(scopeForUser(data.user));
     }
+
+    // Preserve offline-only items still pending in the sync queue.
+    const currentState = get();
+    const [mergedInvoices, mergedFuelLogs, mergedReminders, mergedDocuments, mergedVehicles] =
+      await Promise.all([
+        mergeWithOfflineQueue(data.invoices, currentState.invoices, 'invoices'),
+        mergeWithOfflineQueue(data.fuelLogs, currentState.fuelLogs, 'fuel'),
+        mergeWithOfflineQueue(data.reminders, currentState.reminders, 'reminders'),
+        mergeWithOfflineQueue(data.documents, currentState.documents, 'documents'),
+        mergeWithOfflineQueue(data.vehicles, currentState.vehicles, 'vehicles'),
+      ]);
+
     set({
       user: data.user || get().user,
-      vehicles: data.vehicles || [],
-      invoices: data.invoices || [],
-      reminders: data.reminders || [],
-      documents: data.documents || [],
-      fuelLogs: data.fuelLogs || [],
+      vehicles: mergedVehicles,
+      invoices: mergedInvoices,
+      reminders: mergedReminders,
+      documents: mergedDocuments,
+      fuelLogs: mergedFuelLogs,
       notifications: data.notifications || [],
       vehicleMembersById: data.vehicleMembersById || get().vehicleMembersById,
     });
     await Promise.all([
-      saveCache('vehicles', data.vehicles || []),
-      saveCache('invoices', data.invoices || []),
-      saveCache('reminders', data.reminders || []),
-      saveCache('documents', data.documents || []),
-      saveCache('fuel', data.fuelLogs || []),
+      saveCache('vehicles', mergedVehicles),
+      saveCache('invoices', mergedInvoices),
+      saveCache('reminders', mergedReminders),
+      saveCache('documents', mergedDocuments),
+      saveCache('fuel', mergedFuelLogs),
       saveCache('notifications', data.notifications || []),
       saveCache('vehicleMembersById', data.vehicleMembersById || {}),
     ]);
@@ -368,6 +402,31 @@ const useStore = create((set, get) => ({
         setStorageScope(scopeForUser(user));
         set({ user });
         get().loadQuickActions();
+
+        // Load cached data immediately so offline-only items are visible
+        // until fetch/sync runs. Otherwise the UI starts empty and any
+        // unsynced records can appear "lost" on the next online refresh.
+        const [vehicles, invoices, fuelLogs, reminders, documents, notifications, members] = await Promise.all([
+          loadCache('vehicles'),
+          loadCache('invoices'),
+          loadCache('fuel'),
+          loadCache('reminders'),
+          loadCache('documents'),
+          loadCache('notifications'),
+          loadCache('vehicleMembersById'),
+        ]);
+        set({
+          vehicles: vehicles || [],
+          invoices: invoices || [],
+          fuelLogs: fuelLogs || [],
+          reminders: reminders || [],
+          documents: documents || [],
+          notifications: notifications || [],
+          vehicleMembersById: members || {},
+        });
+
+        const queue = await getQueue();
+        if (queue.length > 0) set({ pendingCount: queue.length });
       } catch {}
     }
   },
@@ -631,8 +690,9 @@ const useStore = create((set, get) => ({
     }
     try {
       const { data } = await api.get('/vehicles');
-      set({ vehicles: data });
-      await saveCache('vehicles', data);
+      const merged = await mergeWithOfflineQueue(data, get().vehicles, 'vehicles');
+      set({ vehicles: merged });
+      await saveCache('vehicles', merged);
     } catch {
       const cached = await loadCache('vehicles');
       if (cached) set({ vehicles: cached });
@@ -778,6 +838,18 @@ const useStore = create((set, get) => ({
     await api.delete(`/vehicles/${id}`);
   },
 
+  setVehicleAvailability: async (vehicleId, payload) => {
+    const { data } = await api.put(`/vehicles/${vehicleId}/availability`, payload);
+    set(s => ({ vehicles: s.vehicles.map(v => v.id === vehicleId ? data : v) }));
+    await saveCache('vehicles', get().vehicles);
+    return data;
+  },
+
+  fetchVehicleStats: async (vehicleId) => {
+    const { data } = await api.get(`/vehicles/${vehicleId}/stats`);
+    return data;
+  },
+
   // ── Documents ───────────────────────────────────────────────────────────────
   fetchDocuments: async (vehicleId) => {
     const { isOnline } = get();
@@ -795,8 +867,9 @@ const useStore = create((set, get) => ({
     }
     try {
       const { data } = await api.get('/documents', { params: vehicleId ? { vehicleId } : {} });
-      set({ documents: data });
-      await saveCache(cacheKey, data);
+      const merged = await mergeWithOfflineQueue(data, get().documents, 'documents');
+      set({ documents: merged });
+      await saveCache(cacheKey, merged);
     } catch {
       const cached = await loadCache(cacheKey);
       if (cached) set({ documents: cached });
@@ -900,8 +973,9 @@ const useStore = create((set, get) => ({
     }
     try {
       const { data } = await api.get('/invoices', { params: vehicleId ? { vehicleId } : {} });
-      set({ invoices: data });
-      await saveCache(cacheKey, data);
+      const merged = await mergeWithOfflineQueue(data, get().invoices, 'invoices');
+      set({ invoices: merged });
+      await saveCache(cacheKey, merged);
     } catch {
       const cached = await loadCache(cacheKey);
       if (cached) set({ invoices: cached });
@@ -1087,8 +1161,9 @@ const useStore = create((set, get) => ({
     }
     try {
       const { data } = await api.get('/reminders');
-      set({ reminders: data });
-      await saveCache('reminders', data);
+      const merged = await mergeWithOfflineQueue(data, get().reminders, 'reminders');
+      set({ reminders: merged });
+      await saveCache('reminders', merged);
     } catch {
       const cached = await loadCache('reminders');
       if (cached) set({ reminders: cached });
@@ -1191,8 +1266,9 @@ const useStore = create((set, get) => ({
     }
     try {
       const { data } = await api.get('/fuel', { params: vehicleId ? { vehicleId } : {} });
-      set({ fuelLogs: data });
-      await saveCache(cacheKey, data);
+      const merged = await mergeWithOfflineQueue(data, get().fuelLogs, 'fuel');
+      set({ fuelLogs: merged });
+      await saveCache(cacheKey, merged);
     } catch {
       const cached = await loadCache(cacheKey);
       if (cached) set({ fuelLogs: cached });

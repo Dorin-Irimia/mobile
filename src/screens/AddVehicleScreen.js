@@ -15,6 +15,7 @@ import { T, RADIUS, FONTS, SHADOW, formatDate } from '../theme';
 import { Card, PrimaryButton, SectionHeader } from '../components/ui';
 import { VEHICLE_CATEGORIES } from '../utils/vehicleCategories';
 import { VehiclePhotoSticker } from '../components/VehiclePhotoSticker';
+import DateField from '../components/DateField';
 
 // ─── Constante ────────────────────────────────────────────────────────────────
 const FUEL_TYPES = ['Benzină', 'Motorină', 'Hibrid', 'Electric', 'GPL', 'GNC'];
@@ -53,6 +54,8 @@ export default function AddVehicleScreen({ navigation, route }) {
     rcaDate: '',
     cascoDate: '',
     rovDate: '',
+    purchaseDate: '',
+    purchaseKm: '',
   });
 
   const pickPhoto = async () => {
@@ -166,6 +169,8 @@ export default function AddVehicleScreen({ navigation, route }) {
         rcaDate: form.rcaDate || undefined,
         cascoDate: form.cascoDate || undefined,
         rovDate: form.rovDate || undefined,
+        purchaseDate: form.purchaseDate || undefined,
+        purchaseKm: form.purchaseKm ? parseInt(form.purchaseKm) : undefined,
       });
       navigation.goBack();
     } catch (e) {
@@ -378,6 +383,31 @@ export default function AddVehicleScreen({ navigation, route }) {
           </Field>
         </Card>
 
+        {/* ── Secțiunea Achiziție ──────────────────────────────────── */}
+        <SectionHeader title="Date achiziție" />
+        <Card style={styles.card}>
+          <DateField
+            label="Data achiziției (opțional)"
+            value={form.purchaseDate}
+            onChange={v => set('purchaseDate', v)}
+            maxDate={new Date()}
+            placeholder="Atinge pentru a alege data"
+          />
+          <Field label="Kilometraj la achiziție (opțional)">
+            <TextInput
+              style={styles.input}
+              value={form.purchaseKm}
+              onChangeText={v => set('purchaseKm', v)}
+              placeholder="ex: 0 pentru mașină nouă, sau km la cumpărare"
+              placeholderTextColor={T.ink4}
+              keyboardType="number-pad"
+            />
+          </Field>
+          <Text style={styles.helperText}>
+            Aceste date sunt folosite pentru graficul de evoluție km și costuri.
+          </Text>
+        </Card>
+
         {/* ── Secțiunea Termene valabilitate ────────────────────────── */}
         <SectionHeader title="Termene valabilitate" />
         <Card style={styles.card}>
@@ -386,30 +416,16 @@ export default function AddVehicleScreen({ navigation, route }) {
             { key: 'rcaDate', label: 'Data expirare RCA' },
             { key: 'cascoDate', label: 'Data expirare CASCO' },
             { key: 'rovDate', label: 'Data expirare Rovinieta' },
-          ].map(({ key, label }) => {
-            const past = isPastDate(form[key]);
-            const errMsg = errors[key];
-            return (
-              <Field key={key} label={label} error={errMsg}>
-                <TextInput
-                  style={[
-                    styles.input,
-                    past && styles.inputWarn,
-                    errMsg && styles.inputError,
-                  ]}
-                  value={form[key]}
-                  onChangeText={v => set(key, v)}
-                  placeholder="YYYY-MM-DD"
-                  placeholderTextColor={T.ink4}
-                  keyboardType="number-pad"
-                  maxLength={10}
-                />
-                {past && !errMsg && (
-                  <Text style={styles.warnText}>⚠️ Data este în trecut</Text>
-                )}
-              </Field>
-            );
-          })}
+          ].map(({ key, label }) => (
+            <DateField
+              key={key}
+              label={label}
+              value={form[key]}
+              onChange={v => set(key, v)}
+              showRelative
+              error={errors[key]}
+            />
+          ))}
         </Card>
 
         {/* Submit */}
@@ -532,6 +548,7 @@ const styles = StyleSheet.create({
   inputError: { borderColor: T.danger, backgroundColor: T.dangerTint },
   inputWarn: { borderColor: T.warn, backgroundColor: T.warnTint },
   warnText: { fontSize: 11, color: T.warn, marginTop: 4 },
+  helperText: { fontSize: 12, color: T.ink3, marginTop: 4, fontStyle: 'italic' },
 
   // Category grid
   categoryGrid: {

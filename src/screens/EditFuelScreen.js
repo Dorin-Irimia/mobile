@@ -30,6 +30,8 @@ import {
 import AttachmentsField from '../components/AttachmentsField';
 import CustomFieldsEditor from '../components/CustomFieldsEditor';
 import LocationField from '../components/LocationField';
+import DateField from '../components/DateField';
+import TimeField from '../components/TimeField';
 
 const FUEL_TYPES = [
   { key: 'benzina', label: '⛽ Benzină' },
@@ -290,31 +292,16 @@ export default function EditFuelScreen({ navigation, route }) {
           </View>
 
           <View style={styles.card}>
-            <View style={styles.row2}>
-              <View style={{ flex: 1.4 }}>
-                <Text style={styles.label}>Data</Text>
-                <TextInput
-                  style={styles.input}
-                  value={date}
-                  onChangeText={setDate}
-                  placeholder="YYYY-MM-DD"
-                  placeholderTextColor={T.ink4}
-                  keyboardType="numbers-and-punctuation"
-                />
-                <Text style={styles.hint}>{formatDate(date)}</Text>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.label}>Ora</Text>
-                <TextInput
-                  style={styles.input}
-                  value={time}
-                  onChangeText={setTime}
-                  placeholder="HH:mm"
-                  placeholderTextColor={T.ink4}
-                  keyboardType="numbers-and-punctuation"
-                />
-              </View>
-            </View>
+            <DateField
+              label="Data"
+              value={date}
+              onChange={setDate}
+            />
+            <TimeField
+              label="Ora (opțional)"
+              value={time}
+              onChange={setTime}
+            />
           </View>
 
           <View style={styles.card}>

@@ -23,9 +23,11 @@ import {
 } from '../components/ui';
 import { getVehicleIcon } from '../utils/vehicleCategories';
 import { VehiclePhotoSticker } from '../components/VehiclePhotoSticker';
+import VehicleAvailabilityModal from '../components/VehicleAvailabilityModal';
+import VehicleStatsTab from '../components/VehicleStatsTab';
 
 // ─── Constante ────────────────────────────────────────────────────────────────
-const TABS = ['Detalii', 'Documente', 'Facturi', 'Combustibil'];
+const TABS = ['Detalii', 'Documente', 'Facturi', 'Combustibil', 'Statistici'];
 const HEADER_MAX = 200;
 const HEADER_MIN = 60;
 const HEADER_SCROLL_DIST = HEADER_MAX - HEADER_MIN;
@@ -57,6 +59,7 @@ export default function VehicleDetailScreen({ navigation, route }) {
   const [activeTab, setActiveTab] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [availabilityModalVisible, setAvailabilityModalVisible] = useState(false);
 
   // Animatii header
   const scrollY = useRef(new Animated.Value(0)).current;
@@ -209,6 +212,14 @@ export default function VehicleDetailScreen({ navigation, route }) {
               <>
                 <TouchableOpacity
                   style={styles.navBtn}
+                  onPress={() => setAvailabilityModalVisible(true)}
+                >
+                  <Text style={styles.navBtnText}>
+                    {vehicle.isEffectivelyAvailable !== false ? '🟢' : '🔴'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.navBtn}
                   onPress={() => navigation.navigate('EditVehicle', { vehicleId })}
                 >
                   <Text style={styles.navBtnText}>✏️</Text>
@@ -259,9 +270,17 @@ export default function VehicleDetailScreen({ navigation, route }) {
               <Text style={styles.heroSub}>
                 {vehicle.year}
                 {vehicle.fuel ? ` · ${vehicle.fuel}` : ''}
+                {vehicle.km != null ? ` · ${Number(vehicle.km).toLocaleString('ro-RO')} km` : ''}
               </Text>
             </View>
           </View>
+          {vehicle.isEffectivelyAvailable === false && (
+            <View style={styles.unavailableBanner}>
+              <Text style={styles.unavailableBannerText} numberOfLines={2}>
+                🚫 INDISPONIBIL · {(vehicle.availabilityReasons || []).map(r => r.label).join(' · ') || 'motiv necunoscut'}
+              </Text>
+            </View>
+          )}
         </Animated.View>
       </Animated.View>
 
@@ -315,11 +334,18 @@ export default function VehicleDetailScreen({ navigation, route }) {
             vehicleId={vehicleId}
           />
         )}
+        {activeTab === 4 && <VehicleStatsTab vehicleId={vehicleId} />}
         <View style={styles.bottomPad} />
       </Animated.ScrollView>
 
       {/* ─── FAB ───────────────────────────────────────────────────────── */}
       <FAB activeTab={activeTab} navigation={navigation} vehicleId={vehicleId} />
+
+      <VehicleAvailabilityModal
+        visible={availabilityModalVisible}
+        vehicle={vehicle}
+        onClose={() => setAvailabilityModalVisible(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -689,6 +715,7 @@ function FAB({ activeTab, navigation, vehicleId }) {
     () => navigation.navigate('DocumentsStack', { vehicleId }),
     () => navigation.navigate('AddInvoice', { vehicleId }),
     () => navigation.navigate('AddFuel', { vehicleId }),
+    null, // tab Statistici – fara FAB
   ];
 
   const action = destinations[activeTab];
@@ -800,6 +827,16 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.4)',
   },
   sharedBadgeText: { fontSize: 11, color: '#fff', fontWeight: FONTS.semibold },
+  unavailableBanner: {
+    marginTop: 10,
+    backgroundColor: 'rgba(224,67,44,0.92)',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: RADIUS.md,
+    alignSelf: 'flex-start',
+    maxWidth: '100%',
+  },
+  unavailableBannerText: { color: '#fff', fontWeight: FONTS.bold, fontSize: 12 },
 
   // Tabs
   tabBar: {

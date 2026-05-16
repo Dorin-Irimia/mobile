@@ -57,7 +57,8 @@
         {
           "locationAlwaysAndWhenInUsePermission": "Urbio Auto folosește locația pentru a completa adresa la cheltuieli și alimentări."
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "web": {
       "favicon": "./assets/favicon.png"

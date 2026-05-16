@@ -31,6 +31,8 @@ import {
 import AttachmentsField from '../components/AttachmentsField';
 import CustomFieldsEditor from '../components/CustomFieldsEditor';
 import LocationField from '../components/LocationField';
+import DateField from '../components/DateField';
+import TimeField from '../components/TimeField';
 
 const FUEL_TYPES = [
   { key: 'benzina', label: '⛽ Benzină' },
@@ -38,6 +40,17 @@ const FUEL_TYPES = [
   { key: 'gpl', label: '💨 GPL' },
   { key: 'electric', label: '⚡ Electric' },
 ];
+
+function fuelKeyFromVehicleFuel(raw) {
+  if (!raw) return 'benzina';
+  const v = String(raw).toLowerCase()
+    .replace(/ă/g, 'a').replace(/â/g, 'a').replace(/î/g, 'i')
+    .replace(/ț/g, 't').replace(/ș/g, 's').trim();
+  if (v.includes('motor')) return 'motorina';
+  if (v.includes('gpl')) return 'gpl';
+  if (v.includes('elect') || v.includes('ev')) return 'electric';
+  return 'benzina';
+}
 
 const COMMON_STATIONS = ['OMV', 'Petrom', 'Lukoil', 'Rompetrol', 'Mol', 'Shell', 'Gazprom', 'Socar'];
 
@@ -57,6 +70,7 @@ export default function AddFuelScreen({ navigation, route }) {
   const presetVehicleId = route?.params?.vehicleId;
   const ownedAndShared = vehicles || [];
   const initialVehicleId = presetVehicleId || ownedAndShared[0]?.id || null;
+  const initialVehicle = ownedAndShared.find(v => v.id === initialVehicleId);
 
   const [vehicleId, setVehicleId] = useState(initialVehicleId);
   const [date, setDate] = useState(todayStr());
@@ -66,7 +80,8 @@ export default function AddFuelScreen({ navigation, route }) {
   const [km, setKm] = useState('');
   const [station, setStation] = useState('');
   const [location, setLocation] = useState('');
-  const [fuelType, setFuelType] = useState('benzina');
+  const [fuelType, setFuelType] = useState(fuelKeyFromVehicleFuel(initialVehicle?.fuel));
+  const [userTouchedFuelType, setUserTouchedFuelType] = useState(false);
   const [fullTank, setFullTank] = useState(true);
   const [notes, setNotes] = useState('');
   const [customFields, setCustomFields] = useState({});
@@ -77,6 +92,23 @@ export default function AddFuelScreen({ navigation, route }) {
     () => ownedAndShared.find(v => v.id === vehicleId),
     [ownedAndShared, vehicleId],
   );
+
+  // Sincronizează automat fuelType cu carburantul vehiculului selectat,
+  // doar dacă utilizatorul nu l-a modificat manual.
+  React.useEffect(() => {
+    if (userTouchedFuelType) return;
+    if (selectedVehicle?.fuel) {
+      const next = fuelKeyFromVehicleFuel(selectedVehicle.fuel);
+      setFuelType(prev => prev === next ? prev : next);
+    }
+  }, [selectedVehicle?.fuel, userTouchedFuelType]);
+
+  // Prefill km from vehicle's current km when changing vehicle
+  React.useEffect(() => {
+    if (selectedVehicle?.km && !km) {
+      setKm(String(selectedVehicle.km));
+    }
+  }, [selectedVehicle?.id]);
 
   const computedTotal =
     liters && pricePerL && !isNaN(parseFloat(liters)) && !isNaN(parseFloat(pricePerL))
@@ -216,7 +248,7 @@ export default function AddFuelScreen({ navigation, route }) {
               {FUEL_TYPES.map(t => (
                 <TouchableOpacity
                   key={t.key}
-                  onPress={() => setFuelType(t.key)}
+                  onPress={() => { setFuelType(t.key); setUserTouchedFuelType(true); }}
                   style={[styles.gridChip, fuelType === t.key && styles.gridChipActive]}
                 >
                   <Text style={[styles.gridChipText, fuelType === t.key && styles.gridChipTextActive]}>
@@ -289,32 +321,18 @@ export default function AddFuelScreen({ navigation, route }) {
 
           {/* Dată + oră */}
           <View style={styles.card}>
-            <View style={styles.row2}>
-              <View style={{ flex: 1.4 }}>
-                <Text style={styles.label}>Data *</Text>
-                <TextInput
-                  style={styles.input}
-                  value={date}
-                  onChangeText={setDate}
-                  placeholder="YYYY-MM-DD"
-                  placeholderTextColor={T.ink4}
-                  keyboardType="numbers-and-punctuation"
-                />
-                <Text style={styles.hint}>{formatDate(date)}</Text>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.label}>Ora</Text>
-                <TextInput
-                  style={styles.input}
-                  value={time}
-                  onChangeText={setTime}
-                  placeholder="HH:mm"
-                  placeholderTextColor={T.ink4}
-                  keyboardType="numbers-and-punctuation"
-                />
-                <Text style={styles.hint}>opțional</Text>
-              </View>
-            </View>
+            <DateField
+              label="Data *"
+              value={date}
+              onChange={setDate}
+              maxDate={new Date()}
+              required
+            />
+            <TimeField
+              label="Ora (opțional)"
+              value={time}
+              onChange={setTime}
+            />
           </View>
 
           {/* Benzinărie + locație */}

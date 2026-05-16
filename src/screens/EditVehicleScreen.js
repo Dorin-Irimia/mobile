@@ -15,6 +15,7 @@ import { T, RADIUS, FONTS, SHADOW } from '../theme';
 import { Card, PrimaryButton, SectionHeader, LoadingView } from '../components/ui';
 import { VEHICLE_CATEGORIES } from '../utils/vehicleCategories';
 import { VehiclePhotoSticker } from '../components/VehiclePhotoSticker';
+import DateField from '../components/DateField';
 
 // ─── Constante ────────────────────────────────────────────────────────────────
 const FUEL_TYPES = ['Benzină', 'Motorină', 'Hibrid', 'Electric', 'GPL', 'GNC'];
@@ -57,6 +58,8 @@ export default function EditVehicleScreen({ navigation, route }) {
     rcaDate: '',
     cascoDate: '',
     rovDate: '',
+    purchaseDate: '',
+    purchaseKm: '',
   });
 
   const pickPhoto = async () => {
@@ -104,6 +107,8 @@ export default function EditVehicleScreen({ navigation, route }) {
         rcaDate: vehicle.rcaDate || '',
         cascoDate: vehicle.cascoDate || '',
         rovDate: vehicle.rovDate || '',
+        purchaseDate: vehicle.purchaseDate || '',
+        purchaseKm: vehicle.purchaseKm != null ? String(vehicle.purchaseKm) : '',
       });
     }
   }, [vehicle]);
@@ -184,10 +189,12 @@ export default function EditVehicleScreen({ navigation, route }) {
         power: parseInt(form.power) || undefined,
         color: form.color.trim() || undefined,
         photoUri: form.photoUri || undefined,
-        itpDate: form.itpDate || undefined,
-        rcaDate: form.rcaDate || undefined,
-        cascoDate: form.cascoDate || undefined,
-        rovDate: form.rovDate || undefined,
+        itpDate: form.itpDate || '',
+        rcaDate: form.rcaDate || '',
+        cascoDate: form.cascoDate || '',
+        rovDate: form.rovDate || '',
+        purchaseDate: form.purchaseDate || '',
+        purchaseKm: form.purchaseKm ? parseInt(form.purchaseKm) : '',
       });
       navigation.goBack();
     } catch (e) {
@@ -413,6 +420,30 @@ export default function EditVehicleScreen({ navigation, route }) {
           </Field>
         </Card>
 
+        {/* ── Secțiunea Achiziție ──────────────────────────────────── */}
+        <SectionHeader title="Date achiziție" />
+        <Card style={styles.card}>
+          <DateField
+            label="Data achiziției (opțional)"
+            value={form.purchaseDate}
+            onChange={v => set('purchaseDate', v)}
+            maxDate={new Date()}
+          />
+          <Field label="Kilometraj la achiziție (opțional)">
+            <TextInput
+              style={styles.input}
+              value={form.purchaseKm}
+              onChangeText={v => set('purchaseKm', v)}
+              placeholder="ex: 0 pentru mașină nouă"
+              placeholderTextColor={T.ink4}
+              keyboardType="number-pad"
+            />
+          </Field>
+          <Text style={styles.helperText}>
+            Folosit pentru graficul de evoluție km și costuri de la achiziție.
+          </Text>
+        </Card>
+
         {/* ── Secțiunea Termene valabilitate ────────────────────────── */}
         <SectionHeader title="Termene valabilitate" />
         <Card style={styles.card}>
@@ -421,31 +452,16 @@ export default function EditVehicleScreen({ navigation, route }) {
             { key: 'rcaDate', label: 'Data expirare RCA' },
             { key: 'cascoDate', label: 'Data expirare CASCO' },
             { key: 'rovDate', label: 'Data expirare Rovinieta' },
-          ].map(({ key, label }) => {
-            const past = isPastDate(form[key]);
-            const errMsg = errors[key];
-            return (
-              <Field key={key} label={label} error={errMsg}>
-                <TextInput
-                  ref={fieldRefs[key] || null}
-                  style={[
-                    styles.input,
-                    past && styles.inputWarn,
-                    errMsg && styles.inputError,
-                  ]}
-                  value={form[key]}
-                  onChangeText={v => set(key, v)}
-                  placeholder="YYYY-MM-DD"
-                  placeholderTextColor={T.ink4}
-                  keyboardType="number-pad"
-                  maxLength={10}
-                />
-                {past && !errMsg && (
-                  <Text style={styles.warnText}>⚠️ Data este în trecut</Text>
-                )}
-              </Field>
-            );
-          })}
+          ].map(({ key, label }) => (
+            <DateField
+              key={key}
+              label={label}
+              value={form[key]}
+              onChange={v => set(key, v)}
+              showRelative
+              error={errors[key]}
+            />
+          ))}
         </Card>
 
         {/* Submit salvare */}
@@ -560,6 +576,7 @@ const styles = StyleSheet.create({
   inputError: { borderColor: T.danger, backgroundColor: T.dangerTint },
   inputWarn: { borderColor: T.warn, backgroundColor: T.warnTint },
   warnText: { fontSize: 11, color: T.warn, marginTop: 4 },
+  helperText: { fontSize: 12, color: T.ink3, marginTop: 4, fontStyle: 'italic' },
 
   // Category grid
   categoryGrid: {

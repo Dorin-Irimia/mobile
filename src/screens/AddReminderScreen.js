@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import useStore from '../store';
 import { T, FONTS, RADIUS, SHADOW } from '../theme';
+import DateField from '../components/DateField';
 import { PrimaryButton } from '../components/ui';
 
 const REMINDER_TYPES = ['ITP', 'RCA', 'CASCO', 'Rovinietă', 'Service', 'Altele'];
@@ -185,13 +186,12 @@ export default function AddReminderScreen({ navigation }) {
             </ScrollView>
           </View>
 
-          <TextInput
-            style={styles.input}
-            placeholder="YYYY-MM-DD"
-            placeholderTextColor={T.ink4}
+          <DateField
+            label="Sau alege din calendar"
             value={dueDate}
-            onChangeText={setDueDate}
-            keyboardType="numbers-and-punctuation"
+            onChange={setDueDate}
+            minDate={new Date()}
+            showRelative
           />
 
           <Text style={styles.label}>Repetare</Text>
