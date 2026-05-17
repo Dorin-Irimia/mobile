@@ -1,27 +1,27 @@
 {
   "expo": {
-    "name": "Urbio Auto",
-    "slug": "urbio-auto",
+    "name": "Talon.",
+    "slug": "Talon.-ro",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/talon-tile.svg",
       "resizeMode": "contain",
       "backgroundColor": "#FF6B1A"
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "ro.urbio.auto",
+      "bundleIdentifier": "com.talon.app",
       "infoPlist": {
-        "NSCameraUsageDescription": "Urbio Auto folosește camera pentru a scana documente și fotografii vehicule.",
-        "NSPhotoLibraryUsageDescription": "Urbio Auto accesează galeria pentru a adăuga fotografii.",
-        "NSFaceIDUsageDescription": "Urbio Auto folosește Face ID pentru autentificare rapidă.",
-        "NSLocationWhenInUseUsageDescription": "Urbio Auto folosește locația ta pentru a completa automat adresa la cheltuieli și alimentări.",
-        "NSCalendarsUsageDescription": "Urbio Auto adaugă scadențele ITP/RCA și reminderele în calendarul telefonului ca să nu le ratezi.",
-        "NSCalendarsFullAccessUsageDescription": "Urbio Auto are nevoie de acces la calendar pentru a salva termenele și reminderele."
+        "NSCameraUsageDescription": "Talon. folosește camera pentru a scana documente și fotografii vehicule.",
+        "NSPhotoLibraryUsageDescription": "Talon. accesează galeria pentru a adăuga fotografii.",
+        "NSFaceIDUsageDescription": "Talon. folosește Face ID pentru autentificare rapidă.",
+        "NSLocationWhenInUseUsageDescription": "Talon. folosește locația ta pentru a completa automat adresa la cheltuieli și alimentări.",
+        "NSCalendarsUsageDescription": "Talon. adaugă scadențele ITP/RCA și reminderele în calendarul telefonului ca să nu le ratezi.",
+        "NSCalendarsFullAccessUsageDescription": "Talon. are nevoie de acces la calendar pentru a salva termenele și reminderele."
       }
     },
     "android": {
@@ -29,7 +29,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#FF6B1A"
       },
-      "package": "ro.urbio.auto",
+      "package": "com.talon.app",
       "edgeToEdgeEnabled": false,
       "permissions": [
         "android.permission.CAMERA",
@@ -62,7 +62,7 @@
       [
         "expo-calendar",
         {
-          "calendarPermission": "Urbio Auto folosește calendarul pentru a salva scadențele ITP/RCA și reminderele tale."
+          "calendarPermission": "Talon. folosește calendarul pentru a salva scadențele ITP/RCA și reminderele tale."
         }
       ],
       [
@@ -76,7 +76,7 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Urbio Auto folosește locația pentru a completa adresa la cheltuieli și alimentări."
+          "locationAlwaysAndWhenInUsePermission": "Talon. folosește locația pentru a completa adresa la cheltuieli și alimentări."
         }
       ],
       "@react-native-community/datetimepicker",

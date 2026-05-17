@@ -293,10 +293,10 @@ export default function HomeScreen({ navigation }) {
         <View style={[styles.heroContent, { paddingHorizontal: hPad }]}>
           <View style={styles.heroTop}>
             <View style={styles.headerLeft}>
-              <Text style={styles.todayStr}>{getTodayStr()}</Text>
-              <Text style={[styles.greeting, display(700), { fontSize: fScale(24) }]}>
-                {getGreeting()}, {firstName}
+              <Text style={[styles.greeting, display(700), { fontSize: fScale(22) }]}>
+                {getGreeting()}, {firstName}!
               </Text>
+              <Text style={styles.todayStr}>{getTodayStr()}</Text>
             </View>
             <View style={styles.headerRight}>
               <OnlineDot />
@@ -325,13 +325,7 @@ export default function HomeScreen({ navigation }) {
           </View>
 
           <View style={styles.heroModeRow}>
-            <ModePill tone="dark" />
-          </View>
-
-          <View style={styles.heroStats}>
-            <StatTile label="Vehicule" value={vehicleList.length} />
-            <StatTile label="Luna curentă" value={formatCurrency(currentMonthTotal, 'RON')} tone="warm" />
-            <StatTile label="Reminder-e" value={(reminders || []).length} tone="green" />
+            <ModePill />
           </View>
         </View>
       </SafeAreaView>
@@ -500,36 +494,35 @@ export default function HomeScreen({ navigation }) {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: T.bg },
   hero: {
-    backgroundColor: '#172027',
-    paddingBottom: SPACING.xl,
-    borderBottomLeftRadius: 28,
-    borderBottomRightRadius: 28,
+    backgroundColor: T.card,
+    borderBottomWidth: 1,
+    borderBottomColor: T.line,
+    paddingBottom: SPACING.md,
   },
   heroContent: { paddingTop: SPACING.sm },
   heroTop: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: SPACING.lg,
+    gap: SPACING.md,
   },
   headerLeft: { flex: 1 },
-  greeting: { fontWeight: FONTS.bold, color: '#fff', marginTop: 2 },
+  greeting: { color: T.ink },
   todayStr: {
     fontSize: 12,
     fontWeight: FONTS.semibold,
-    color: '#B9C7B2',
+    color: T.ink3,
     textTransform: 'capitalize',
+    marginTop: 2,
   },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm },
   iconBtn: {
     width: TOUCH_TARGET,
     height: TOUCH_TARGET,
     borderRadius: TOUCH_TARGET / 2,
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: T.brandTint,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
   },
   iconBtnText: { fontSize: 18 },
   badge: {
@@ -546,7 +539,7 @@ const styles = StyleSheet.create({
   },
   badgeText: { fontSize: 10, fontWeight: FONTS.bold, color: '#fff' },
   heroModeRow: {
-    marginTop: SPACING.lg,
+    marginTop: SPACING.md,
   },
   heroStats: {
     flexDirection: 'row',

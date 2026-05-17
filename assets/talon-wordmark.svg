@@ -1,0 +1,16 @@
+<svg viewBox="0 0 360 120" xmlns="http://www.w3.org/2000/svg" fill="none">
+  <title>Talon wordmark</title>
+
+  
+  <g transform="translate(0, 0)">
+    <rect x="14" y="40" width="92" height="20" rx="10" fill="#FF6B1A"></rect>
+    <rect x="34" y="68" width="52" height="10" rx="5" fill="#FF6B1A" opacity="0.55"></rect>
+    <circle cx="60" cy="92" r="5" fill="#FF6B1A"></circle>
+  </g>
+
+  
+  <text x="140" y="80" font-family="&#39;Bricolage Grotesque&#39;, &#39;Plus Jakarta Sans&#39;, system-ui, sans-serif" font-weight="700" font-size="56" letter-spacing="-2" fill="#0E1116">talon</text>
+
+  
+  <circle cx="345" cy="78" r="6" fill="#FF6B1A"></circle>
+</svg>
