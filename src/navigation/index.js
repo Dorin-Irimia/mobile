@@ -34,6 +34,10 @@ import FriendsScreen from '../screens/FriendsScreen';
 import ShareVehicleScreen from '../screens/ShareVehicleScreen';
 import EditInvoiceScreen from '../screens/EditInvoiceScreen';
 import EditFuelScreen from '../screens/EditFuelScreen';
+import ServiceHistoryScreen from '../screens/ServiceHistoryScreen';
+import AddServiceRecordScreen from '../screens/AddServiceRecordScreen';
+import FuelAnalyticsScreen from '../screens/FuelAnalyticsScreen';
+import FriendsChatScreen from '../screens/FriendsChatScreen';
 
 // Household screens
 import ModeSelectorScreen from '../screens/ModeSelectorScreen';
@@ -47,6 +51,10 @@ import AddHouseholdIncomeScreen from '../screens/AddHouseholdIncomeScreen';
 import AddHouseholdEventScreen from '../screens/AddHouseholdEventScreen';
 import ShareHouseholdScreen from '../screens/ShareHouseholdScreen';
 import CustomCategoriesScreen from '../screens/CustomCategoriesScreen';
+import BudgetTrackerScreen from '../screens/BudgetTrackerScreen';
+import EditBudgetCategoryScreen from '../screens/EditBudgetCategoryScreen';
+import BillsScreen from '../screens/BillsScreen';
+import AddBillScreen from '../screens/AddBillScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -151,6 +159,10 @@ export default function AppNavigator() {
         <Stack.Screen name="ShareVehicle" component={ShareVehicleScreen} options={{ presentation: 'card' }} />
         <Stack.Screen name="EditInvoice" component={EditInvoiceScreen} options={{ presentation: 'modal' }} />
         <Stack.Screen name="EditFuel" component={EditFuelScreen} options={{ presentation: 'modal' }} />
+        <Stack.Screen name="ServiceHistory" component={ServiceHistoryScreen} />
+        <Stack.Screen name="AddServiceRecord" component={AddServiceRecordScreen} options={{ presentation: 'modal' }} />
+        <Stack.Screen name="FuelAnalytics" component={FuelAnalyticsScreen} />
+        <Stack.Screen name="FriendsChat" component={FriendsChatScreen} />
         {/* Household */}
         <Stack.Screen name="AddHousehold" component={AddHouseholdScreen} options={{ presentation: 'modal' }} />
         <Stack.Screen name="EditHousehold" component={AddHouseholdScreen} options={{ presentation: 'modal' }} />
@@ -159,6 +171,10 @@ export default function AppNavigator() {
         <Stack.Screen name="AddHouseholdEvent" component={AddHouseholdEventScreen} options={{ presentation: 'modal' }} />
         <Stack.Screen name="ShareHousehold" component={ShareHouseholdScreen} options={{ presentation: 'card' }} />
         <Stack.Screen name="CustomCategories" component={CustomCategoriesScreen} options={{ presentation: 'modal' }} />
+        <Stack.Screen name="BudgetTracker" component={BudgetTrackerScreen} />
+        <Stack.Screen name="EditBudgetCategory" component={EditBudgetCategoryScreen} options={{ presentation: 'modal' }} />
+        <Stack.Screen name="Bills" component={BillsScreen} />
+        <Stack.Screen name="AddBill" component={AddBillScreen} options={{ presentation: 'modal' }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

@@ -180,7 +180,11 @@ export default function FriendsScreen({ navigation }) {
   };
 
   const renderFriend = ({ item }) => (
-    <View style={styles.row}>
+    <TouchableOpacity
+      style={styles.row}
+      activeOpacity={0.7}
+      onPress={() => navigation.navigate('FriendsChat', { friend: item.friend })}
+    >
       <Avatar name={item.friend.name} uri={avatarUri(item.friend.avatar)} />
       <View style={{ flex: 1, marginLeft: SPACING.md }}>
         <Text style={styles.rowName} numberOfLines={1}>{item.friend.name}</Text>
@@ -188,12 +192,19 @@ export default function FriendsScreen({ navigation }) {
       </View>
       <TouchableOpacity
         style={styles.iconBtn}
+        onPress={() => navigation.navigate('FriendsChat', { friend: item.friend })}
+        hitSlop={HIT_SLOP}
+      >
+        <Text style={styles.iconBtnTextBrand}>💬</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={styles.iconBtn}
         onPress={() => handleRemove(item.id, item.friend.name)}
         hitSlop={HIT_SLOP}
       >
         <Text style={styles.iconBtnTextDanger}>✕</Text>
       </TouchableOpacity>
-    </View>
+    </TouchableOpacity>
   );
 
   const renderPending = ({ item }) => (
@@ -451,6 +462,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   iconBtnTextDanger: { fontSize: 20, color: T.ink4 },
+  iconBtnTextBrand: { fontSize: 18 },
   pendingActions: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm },
   acceptBtn: {
     backgroundColor: T.brand,

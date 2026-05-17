@@ -413,19 +413,19 @@ export default function HouseholdHomeScreen({ navigation }) {
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.actionTile}
-            onPress={() => navigation.navigate('HouseholdExpenses')}
+            onPress={() => navigation.navigate('BudgetTracker')}
             activeOpacity={0.85}
           >
             <Text style={styles.actionIcon}>📊</Text>
-            <Text style={styles.actionLabel}>Rapoarte</Text>
+            <Text style={styles.actionLabel}>Buget</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.actionTile}
-            onPress={() => navigation.navigate('HouseholdCalendar')}
+            onPress={() => navigation.navigate('Bills')}
             activeOpacity={0.85}
           >
-            <Text style={styles.actionIcon}>🗓</Text>
-            <Text style={styles.actionLabel}>Calendar</Text>
+            <Text style={styles.actionIcon}>🧾</Text>
+            <Text style={styles.actionLabel}>Facturi</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.actionTile, !isOnline && styles.actionTileDisabled]}

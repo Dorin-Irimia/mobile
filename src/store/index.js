@@ -2057,6 +2057,272 @@ const useStore = create((set, get) => ({
     try { await api.put('/notifications/read-all'); } catch {}
     await saveCache('notifications', get().notifications);
   },
+
+  // ── Service Records ────────────────────────────────────────────────────────
+  serviceRecords: [],
+
+  fetchServiceRecords: async (vehicleId) => {
+    const { isOnline } = get();
+    const cacheKey = vehicleId ? `serviceRecords_${vehicleId}` : 'serviceRecords';
+    if (!isOnline) {
+      const cached = await loadCache(cacheKey);
+      if (cached) set({ serviceRecords: cached });
+      return cached || get().serviceRecords;
+    }
+    try {
+      const { data } = await api.get('/service-records', { params: vehicleId ? { vehicleId } : {} });
+      set({ serviceRecords: data });
+      await saveCache(cacheKey, data);
+      return data;
+    } catch {
+      const cached = await loadCache(cacheKey);
+      if (cached) set({ serviceRecords: cached });
+      return cached || [];
+    }
+  },
+
+  addServiceRecord: async (payload) => {
+    if (!get().isOnline) throw new OfflineActionError();
+    const clientId = createClientId('srv');
+    const { data } = await api.post('/service-records', { ...payload, clientId });
+    set(s => ({ serviceRecords: [data, ...s.serviceRecords] }));
+    await saveCache('serviceRecords', get().serviceRecords);
+    return data;
+  },
+
+  updateServiceRecord: async (id, patch) => {
+    if (!get().isOnline) throw new OfflineActionError();
+    const { data } = await api.put(`/service-records/${id}`, patch);
+    set(s => ({ serviceRecords: s.serviceRecords.map(r => r.id === id ? data : r) }));
+    await saveCache('serviceRecords', get().serviceRecords);
+    return data;
+  },
+
+  deleteServiceRecord: async (id) => {
+    if (!get().isOnline) throw new OfflineActionError();
+    await api.delete(`/service-records/${id}`);
+    set(s => ({ serviceRecords: s.serviceRecords.filter(r => r.id !== id) }));
+    await saveCache('serviceRecords', get().serviceRecords);
+  },
+
+  // ── Household Bills ────────────────────────────────────────────────────────
+  householdBills: [],
+
+  fetchHouseholdBills: async (householdId) => {
+    const { isOnline } = get();
+    const cacheKey = householdId ? `householdBills_${householdId}` : 'householdBills';
+    if (!isOnline) {
+      const cached = await loadCache(cacheKey);
+      if (cached) set({ householdBills: cached });
+      return cached || get().householdBills;
+    }
+    try {
+      const { data } = await api.get('/household-bills', { params: householdId ? { householdId } : {} });
+      set({ householdBills: data });
+      await saveCache(cacheKey, data);
+      return data;
+    } catch {
+      const cached = await loadCache(cacheKey);
+      if (cached) set({ householdBills: cached });
+      return cached || [];
+    }
+  },
+
+  addHouseholdBill: async (payload) => {
+    if (!get().isOnline) throw new OfflineActionError();
+    const clientId = createClientId('bill');
+    const { data } = await api.post('/household-bills', { ...payload, clientId });
+    set(s => ({ householdBills: [data, ...s.householdBills] }));
+    await saveCache('householdBills', get().householdBills);
+    return data;
+  },
+
+  updateHouseholdBill: async (id, patch) => {
+    if (!get().isOnline) throw new OfflineActionError();
+    const { data } = await api.put(`/household-bills/${id}`, patch);
+    set(s => ({ householdBills: s.householdBills.map(b => b.id === id ? data : b) }));
+    await saveCache('householdBills', get().householdBills);
+    return data;
+  },
+
+  payHouseholdBill: async (id) => {
+    if (!get().isOnline) throw new OfflineActionError();
+    const { data } = await api.post(`/household-bills/${id}/pay`);
+    set(s => ({ householdBills: s.householdBills.map(b => b.id === id ? data : b) }));
+    await saveCache('householdBills', get().householdBills);
+    return data;
+  },
+
+  deleteHouseholdBill: async (id) => {
+    if (!get().isOnline) throw new OfflineActionError();
+    await api.delete(`/household-bills/${id}`);
+    set(s => ({ householdBills: s.householdBills.filter(b => b.id !== id) }));
+    await saveCache('householdBills', get().householdBills);
+  },
+
+  // ── Budget ─────────────────────────────────────────────────────────────────
+  budgetCategories: [],
+  budgetSummary: null,
+
+  fetchBudgetCategories: async (householdId) => {
+    if (!get().isOnline) {
+      const cached = await loadCache(`budgetCategories_${householdId || 'all'}`);
+      if (cached) set({ budgetCategories: cached });
+      return cached || [];
+    }
+    try {
+      const { data } = await api.get('/budgets/categories', { params: householdId ? { householdId } : {} });
+      set({ budgetCategories: data });
+      await saveCache(`budgetCategories_${householdId || 'all'}`, data);
+      return data;
+    } catch {
+      const cached = await loadCache(`budgetCategories_${householdId || 'all'}`);
+      if (cached) set({ budgetCategories: cached });
+      return cached || [];
+    }
+  },
+
+  fetchBudgetSummary: async (householdId, month) => {
+    if (!householdId) return null;
+    if (!get().isOnline) {
+      const cached = await loadCache(`budgetSummary_${householdId}`);
+      if (cached) set({ budgetSummary: cached });
+      return cached;
+    }
+    try {
+      const { data } = await api.get('/budgets/summary', {
+        params: { householdId, ...(month ? { month } : {}) },
+      });
+      set({ budgetSummary: data, budgetCategories: data.categories });
+      await saveCache(`budgetSummary_${householdId}`, data);
+      return data;
+    } catch {
+      const cached = await loadCache(`budgetSummary_${householdId}`);
+      if (cached) set({ budgetSummary: cached });
+      return cached;
+    }
+  },
+
+  upsertBudgetCategory: async (payload) => {
+    if (!get().isOnline) throw new OfflineActionError();
+    const { data } = await api.post('/budgets/categories', payload);
+    set(s => {
+      const exists = s.budgetCategories.some(c => c.id === data.id);
+      return {
+        budgetCategories: exists
+          ? s.budgetCategories.map(c => c.id === data.id ? data : c)
+          : [...s.budgetCategories, data],
+      };
+    });
+    return data;
+  },
+
+  updateBudgetCategory: async (id, patch) => {
+    if (!get().isOnline) throw new OfflineActionError();
+    const { data } = await api.put(`/budgets/categories/${id}`, patch);
+    set(s => ({ budgetCategories: s.budgetCategories.map(c => c.id === id ? data : c) }));
+    return data;
+  },
+
+  deleteBudgetCategory: async (id) => {
+    if (!get().isOnline) throw new OfflineActionError();
+    await api.delete(`/budgets/categories/${id}`);
+    set(s => ({ budgetCategories: s.budgetCategories.filter(c => c.id !== id) }));
+  },
+
+  // ── Chat ───────────────────────────────────────────────────────────────────
+  chatThreads: [],
+  chatByFriend: {},        // { [friendId]: ChatMessage[] }
+
+  fetchChatThreads: async () => {
+    if (!get().isOnline) return get().chatThreads;
+    try {
+      const { data } = await api.get('/chats/threads');
+      set({ chatThreads: data });
+      return data;
+    } catch {
+      return get().chatThreads;
+    }
+  },
+
+  fetchChatMessages: async (friendId) => {
+    if (!friendId) return [];
+    if (!get().isOnline) {
+      const cached = await loadCache(`chat_${friendId}`);
+      if (cached) set(s => ({ chatByFriend: { ...s.chatByFriend, [friendId]: cached } }));
+      return cached || [];
+    }
+    try {
+      const { data } = await api.get(`/chats/${friendId}/messages`);
+      set(s => ({ chatByFriend: { ...s.chatByFriend, [friendId]: data } }));
+      await saveCache(`chat_${friendId}`, data);
+      return data;
+    } catch {
+      const cached = await loadCache(`chat_${friendId}`);
+      if (cached) set(s => ({ chatByFriend: { ...s.chatByFriend, [friendId]: cached } }));
+      return cached || [];
+    }
+  },
+
+  sendChatMessage: async (friendId, { text, kind, metadata } = {}) => {
+    if (!friendId) throw new Error('friendId obligatoriu');
+    const clientId = createClientId('msg');
+    const optimistic = {
+      id: `local-${clientId}`,
+      clientId,
+      fromUserId: get().user?.id,
+      toUserId: friendId,
+      text: text || null,
+      kind: kind || 'text',
+      metadata: metadata || null,
+      createdAt: new Date().toISOString(),
+      _pending: true,
+    };
+    set(s => ({
+      chatByFriend: {
+        ...s.chatByFriend,
+        [friendId]: [...(s.chatByFriend[friendId] || []), optimistic],
+      },
+    }));
+
+    if (!get().isOnline) return optimistic;
+
+    try {
+      const { data } = await api.post(`/chats/${friendId}/messages`, { clientId, text, kind, metadata });
+      set(s => ({
+        chatByFriend: {
+          ...s.chatByFriend,
+          [friendId]: (s.chatByFriend[friendId] || []).map(m => m.id === optimistic.id ? data : m),
+        },
+      }));
+      await saveCache(`chat_${friendId}`, get().chatByFriend[friendId]);
+      return data;
+    } catch (e) {
+      set(s => ({
+        chatByFriend: {
+          ...s.chatByFriend,
+          [friendId]: (s.chatByFriend[friendId] || []).map(m => m.id === optimistic.id ? { ...m, _failed: true } : m),
+        },
+      }));
+      throw e;
+    }
+  },
+
+  deleteChatMessage: async (friendId, messageId) => {
+    if (!get().isOnline) throw new OfflineActionError();
+    await api.delete(`/chats/${friendId}/messages/${messageId}`);
+    set(s => ({
+      chatByFriend: {
+        ...s.chatByFriend,
+        [friendId]: (s.chatByFriend[friendId] || []).filter(m => m.id !== messageId),
+      },
+    }));
+  },
+
+  markChatRead: async (friendId) => {
+    if (!friendId || !get().isOnline) return;
+    try { await api.post(`/chats/${friendId}/read`); } catch {}
+  },
 }));
 
 export default useStore;

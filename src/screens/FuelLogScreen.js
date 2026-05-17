@@ -173,7 +173,13 @@ export default function FuelLogScreen({ navigation }) {
           <Text style={styles.backText}>←</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Jurnal Combustibil</Text>
-        <View style={styles.headerRight} />
+        <TouchableOpacity
+          onPress={() => navigation.navigate('FuelAnalytics')}
+          style={styles.headerRight}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Text style={styles.analyticsBtn}>📊</Text>
+        </TouchableOpacity>
       </View>
 
       <SectionList
@@ -410,7 +416,8 @@ const styles = StyleSheet.create({
   backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   backText: { fontSize: 22, color: T.ink, fontWeight: FONTS.medium },
   headerTitle: { fontSize: 18, fontWeight: FONTS.bold, color: T.ink },
-  headerRight: { width: 36 },
+  headerRight: { width: 36, alignItems: 'center', justifyContent: 'center' },
+  analyticsBtn: { fontSize: 22 },
   listContent: { paddingHorizontal: 16, paddingBottom: 100 },
   vehicleScroll: { marginBottom: 12 },
   vehicleRow: { gap: 8, paddingBottom: 4 },
