@@ -56,7 +56,7 @@ export default function ServerConfigScreen({ navigation }) {
           <Text style={styles.infoText}>Pe Mac, deschide Terminal și scrie:{'\n'}
             <Text style={styles.code}>ipconfig getifaddr en0</Text>
             {'\n\n'}Formatul adresei:{'\n'}
-            <Text style={styles.code}>http://192.168.X.X:3001</Text>
+            <Text style={styles.code}>http://192.168.X.X:3002</Text>
           </Text>
         </View>
 
@@ -65,7 +65,7 @@ export default function ServerConfigScreen({ navigation }) {
           style={[styles.input, status === 'error' && styles.inputError, status === 'ok' && styles.inputOk]}
           value={url}
           onChangeText={v => { setUrl(v); setStatus(null); }}
-          placeholder="http://192.168.1.XXX:3001"
+          placeholder="http://192.168.1.XXX:3002"
           placeholderTextColor={T.ink4}
           autoCapitalize="none"
           autoCorrect={false}
