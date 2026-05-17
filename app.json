@@ -1,16 +1,16 @@
 {
   "expo": {
-    "name": "Talon.",
+    "name": "Talon",
     "slug": "urbio-auto",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/talon-app-icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/talon-tile.svg",
+      "image": "./assets/talon-splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#FF6B1A"
+      "backgroundColor": "#FFFFFF"
     },
     "ios": {
       "supportsTablet": true,
@@ -26,11 +26,11 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#FF6B1A"
+        "foregroundImage": "./assets/talon-adaptive-icon.png",
+        "backgroundColor": "#FFFFFF"
       },
       "package": "com.talon.app",
-      "edgeToEdgeEnabled": false,
+      "edgeToEdgeEnabled": true,
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.READ_EXTERNAL_STORAGE",
@@ -43,17 +43,7 @@
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.RECORD_AUDIO",
         "android.permission.READ_CALENDAR",
-        "android.permission.WRITE_CALENDAR",
-        "android.permission.CAMERA",
-        "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.USE_BIOMETRIC",
-        "android.permission.USE_FINGERPRINT",
-        "android.permission.RECEIVE_BOOT_COMPLETED",
-        "android.permission.VIBRATE",
-        "android.permission.ACCESS_FINE_LOCATION",
-        "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.WRITE_CALENDAR"
       ]
     },
     "plugins": [
@@ -86,10 +76,10 @@
       "favicon": "./assets/favicon.png"
     },
     "notification": {
-      "icon": "./assets/icon.png",
+      "icon": "./assets/talon-app-icon.png",
       "color": "#FF6B1A",
       "androidMode": "default",
-      "androidCollapsedTitle": "Urbio Auto",
+      "androidCollapsedTitle": "Talon.",
       "iosDisplayInForeground": true
     },
     "extra": {

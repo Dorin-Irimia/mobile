@@ -11,11 +11,14 @@ import {
   Animated,
   ActivityIndicator,
   Dimensions,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import useStore from '../store';
 import { T, RADIUS, SHADOW, FONTS, useResponsive, display } from '../theme';
 import ServerConfigScreen from './ServerConfigScreen';
+
+const TALON_MARK = require('../../assets/talon-login-mark.png');
 
 export default function AuthScreen() {
   const { isTablet, hPad } = useResponsive();
@@ -113,7 +116,7 @@ export default function AuthScreen() {
   const INNER_WIDTH = Math.min(cardMax, screenWidth) - hPad * 2 - 56;
   const tabIndicatorTranslate = tabAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: [4, INNER_WIDTH / 2 + 4],
+    outputRange: [5, INNER_WIDTH / 2 + 5],
   });
 
   const fieldStyle = (field) => [
@@ -127,8 +130,8 @@ export default function AuthScreen() {
 
   return (
     <View style={styles.root}>
-      <View style={styles.bgTop} />
-      <View style={styles.bgBottom} />
+      <View style={styles.bgGlowPrimary} />
+      <View style={styles.bgGlowSecondary} />
       <SafeAreaView style={styles.safe}>
         <KeyboardAvoidingView
           style={styles.flex}
@@ -144,13 +147,13 @@ export default function AuthScreen() {
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-            <View style={styles.logoWrap}>
-              <View style={styles.logo}>
-                <Text style={styles.logoLetter}>U</Text>
+            <View style={styles.hero}>
+              <View style={styles.logoWrap}>
+                <Image source={TALON_MARK} style={styles.logoImage} resizeMode="contain" />
               </View>
+              <Text style={styles.appTitle}>talon.</Text>
+              <Text style={styles.appSub}>Mașini și locuințe într-un singur loc</Text>
             </View>
-            <Text style={styles.appTitle}>Urbio Auto</Text>
-            <Text style={styles.appSub}>Gestionează-ți vehiculele cu ușurință</Text>
 
             <View style={styles.card}>
               <View style={styles.tabBar}>
@@ -288,7 +291,7 @@ export default function AuthScreen() {
               </View>
             </View>
 
-            <Text style={styles.footer}>Urbio Auto © 2024</Text>
+            <Text style={styles.footer}>Talon. © 2026</Text>
             <TouchableOpacity onPress={() => setShowServerConfig(true)} style={styles.serverConfigBtn}>
               <Text style={styles.serverConfigText}>⚙️ Configurare server</Text>
             </TouchableOpacity>
@@ -302,23 +305,25 @@ export default function AuthScreen() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: T.bg,
+    backgroundColor: '#F7F4EF',
   },
-  bgTop: {
+  bgGlowPrimary: {
     position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: '70%',
-    backgroundColor: T.bg,
+    top: -140,
+    right: -90,
+    width: 280,
+    height: 280,
+    borderRadius: 140,
+    backgroundColor: 'rgba(255, 107, 26, 0.14)',
   },
-  bgBottom: {
+  bgGlowSecondary: {
     position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: '30%',
-    backgroundColor: T.brand,
+    top: 120,
+    left: -70,
+    width: 180,
+    height: 180,
+    borderRadius: 90,
+    backgroundColor: 'rgba(255, 184, 141, 0.18)',
   },
   safe: {
     flex: 1,
@@ -329,66 +334,71 @@ const styles = StyleSheet.create({
   scroll: {
     flexGrow: 1,
     alignItems: 'center',
-    paddingVertical: 32,
+    paddingTop: 28,
+    paddingBottom: 40,
+  },
+  hero: {
+    alignItems: 'center',
+    marginBottom: 24,
   },
   logoWrap: {
-    marginBottom: 16,
-    ...SHADOW.md,
-  },
-  logo: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: T.brand,
+    width: 108,
+    height: 108,
+    borderRadius: 32,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.88)',
+    marginBottom: 18,
+    ...SHADOW.md,
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
   },
-  logoLetter: {
-    fontSize: 40,
-    fontWeight: FONTS.bold,
-    color: '#fff',
-    lineHeight: 48,
+  logoImage: {
+    width: 88,
+    height: 88,
   },
   appTitle: {
-    fontSize: 32,
-    color: T.ink,
-    marginBottom: 6,
-    ...display(700, { letterSpacing: -0.6 }),
+    fontSize: 48,
+    color: '#0E1116',
+    marginBottom: 8,
+    ...display(700, { letterSpacing: -1.4 }),
   },
   appSub: {
-    fontSize: 14,
+    fontSize: 17,
     fontWeight: FONTS.regular,
-    color: T.ink3,
-    marginBottom: 32,
+    color: '#6E7582',
     textAlign: 'center',
+    maxWidth: 320,
+    lineHeight: 24,
   },
   card: {
     width: '100%',
-    backgroundColor: T.card,
-    borderRadius: RADIUS.xl,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 34,
     padding: 28,
     ...SHADOW.md,
-    shadowOpacity: 0.14,
-    shadowRadius: 20,
-    elevation: 10,
+    shadowOpacity: 0.12,
+    shadowRadius: 24,
+    elevation: 12,
   },
   tabBar: {
     flexDirection: 'row',
-    backgroundColor: T.line2,
-    borderRadius: RADIUS.lg,
+    backgroundColor: '#ECEEF2',
+    borderRadius: 22,
     marginBottom: 24,
-    height: 44,
+    height: 56,
     position: 'relative',
     overflow: 'hidden',
+    padding: 5,
   },
   tabIndicator: {
     position: 'absolute',
-    top: 4,
+    top: 5,
     left: 0,
     width: '50%',
-    height: 36,
+    height: 46,
     backgroundColor: T.brand,
-    borderRadius: RADIUS.md,
+    borderRadius: 18,
   },
   tabBtn: {
     flex: 1,
@@ -397,9 +407,9 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   tabLabel: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: FONTS.medium,
-    color: T.ink3,
+    color: '#6E7582',
   },
   tabLabelActive: {
     color: '#fff',
@@ -419,15 +429,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1.5,
-    borderColor: T.line,
-    borderRadius: RADIUS.md,
-    backgroundColor: T.bgSoft,
-    paddingHorizontal: 12,
-    height: 48,
+    borderColor: '#E1E4EA',
+    borderRadius: 18,
+    backgroundColor: '#FBFBFC',
+    paddingHorizontal: 16,
+    height: 58,
   },
   inputFocused: {
     borderColor: T.brand,
-    backgroundColor: T.brandTint,
+    backgroundColor: '#FFF5EE',
   },
   inputIcon: {
     fontSize: 16,
@@ -452,8 +462,8 @@ const styles = StyleSheet.create({
   },
   submitBtn: {
     marginTop: 24,
-    height: 52,
-    borderRadius: RADIUS.lg,
+    height: 56,
+    borderRadius: 20,
     backgroundColor: T.brand,
     justifyContent: 'center',
     alignItems: 'center',
@@ -473,8 +483,8 @@ const styles = StyleSheet.create({
   footer: {
     marginTop: 32,
     fontSize: 12,
-    color: '#fff',
-    opacity: 0.7,
+    color: '#6E7582',
+    opacity: 0.92,
   },
   serverConfigBtn: {
     marginTop: 12,
@@ -482,7 +492,8 @@ const styles = StyleSheet.create({
   },
   serverConfigText: {
     fontSize: 12,
-    color: '#fff',
-    opacity: 0.6,
+    color: T.brand,
+    opacity: 0.9,
+    fontWeight: FONTS.medium,
   },
 });
