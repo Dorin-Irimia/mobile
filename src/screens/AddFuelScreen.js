@@ -33,6 +33,7 @@ import CustomFieldsEditor from '../components/CustomFieldsEditor';
 import LocationField from '../components/LocationField';
 import DateField from '../components/DateField';
 import TimeField from '../components/TimeField';
+import SuggestInput from '../components/SuggestInput';
 
 const FUEL_TYPES = [
   { key: 'benzina', label: '⛽ Benzină' },
@@ -65,6 +66,7 @@ function nowTimeStr() {
 export default function AddFuelScreen({ navigation, route }) {
   const vehicles = useStore(s => s.vehicles);
   const addFuelLog = useStore(s => s.addFuelLog);
+  const recordSuggestions = useStore(s => s.recordSuggestions);
   const { isTablet, hPad, maxContentWidth } = useResponsive();
 
   const presetVehicleId = route?.params?.vehicleId;
@@ -162,6 +164,10 @@ export default function AddFuelScreen({ navigation, route }) {
         });
       });
       await addFuelLog(fd);
+      recordSuggestions({
+        station: station.trim(),
+        location: location.trim(),
+      }).catch(() => {});
       navigation.goBack();
     } catch (e) {
       Alert.alert('Eroare', e?.response?.data?.error || 'Nu s-a putut salva.');
@@ -338,7 +344,8 @@ export default function AddFuelScreen({ navigation, route }) {
           {/* Benzinărie + locație */}
           <View style={styles.card}>
             <Text style={styles.label}>Benzinărie</Text>
-            <TextInput
+            <SuggestInput
+              field="station"
               style={styles.input}
               value={station}
               onChangeText={setStation}

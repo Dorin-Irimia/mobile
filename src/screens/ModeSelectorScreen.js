@@ -17,6 +17,7 @@ import {
   SPACING,
   useResponsive,
   HIT_SLOP,
+  display,
 } from '../theme';
 
 export default function ModeSelectorScreen({ onSelected }) {
@@ -115,11 +116,12 @@ const styles = StyleSheet.create({
   header: { marginBottom: SPACING.lg, alignItems: 'center' },
   hello: { fontSize: 14, color: T.ink3, fontWeight: FONTS.medium },
   title: {
-    fontSize: 26,
-    fontWeight: FONTS.bold,
+    fontSize: 28,
     color: T.ink,
     marginTop: SPACING.sm,
     textAlign: 'center',
+    lineHeight: 32,
+    ...display(700, { letterSpacing: -0.4 }),
   },
   subtitle: { fontSize: 13, color: T.ink3, marginTop: SPACING.sm, textAlign: 'center' },
 

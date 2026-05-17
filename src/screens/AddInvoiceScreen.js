@@ -31,6 +31,7 @@ import CustomFieldsEditor from '../components/CustomFieldsEditor';
 import LocationField from '../components/LocationField';
 import DateField from '../components/DateField';
 import TimeField from '../components/TimeField';
+import SuggestInput from '../components/SuggestInput';
 
 const CATEGORIES = [
   { key: 'service', label: '🔧 Service' },
@@ -54,6 +55,7 @@ function nowTimeStr() {
 export default function AddInvoiceScreen({ navigation, route }) {
   const vehicles = useStore(s => s.vehicles);
   const addInvoice = useStore(s => s.addInvoice);
+  const recordSuggestions = useStore(s => s.recordSuggestions);
   const { isTablet, hPad, maxContentWidth } = useResponsive();
 
   const presetVehicleId = route?.params?.vehicleId;
@@ -126,6 +128,12 @@ export default function AddInvoiceScreen({ navigation, route }) {
         });
       });
       await addInvoice(fd);
+      recordSuggestions({
+        invoiceTitle: title.trim(),
+        merchant: merchant.trim(),
+        location: location.trim(),
+        note: notes.trim(),
+      }).catch(() => {});
       navigation.goBack();
     } catch (e) {
       Alert.alert('Eroare', e?.response?.data?.error || 'Nu s-a putut salva.');
@@ -225,7 +233,8 @@ export default function AddInvoiceScreen({ navigation, route }) {
           {/* Sumă + titlu */}
           <View style={styles.card}>
             <Text style={styles.label}>Titlu *</Text>
-            <TextInput
+            <SuggestInput
+              field="invoiceTitle"
               style={styles.input}
               value={title}
               onChangeText={setTitle}
@@ -300,7 +309,8 @@ export default function AddInvoiceScreen({ navigation, route }) {
           {/* Magazin + locație */}
           <View style={styles.card}>
             <Text style={styles.label}>Magazin / atelier / firmă</Text>
-            <TextInput
+            <SuggestInput
+              field="merchant"
               style={styles.input}
               value={merchant}
               onChangeText={setMerchant}

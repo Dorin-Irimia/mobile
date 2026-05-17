@@ -15,7 +15,7 @@ import useStore from '../store';
 import {
   T, RADIUS, SHADOW, FONTS, SPACING,
   formatDate, formatCurrency, daysUntil,
-  useResponsive, HIT_SLOP,
+  useResponsive, HIT_SLOP, display,
 } from '../theme';
 import { getApiUrl } from '../api/client';
 import { OnlineDot } from '../components/NetworkBadge';
@@ -529,7 +529,7 @@ const styles = StyleSheet.create({
   header: { backgroundColor: T.card, borderBottomWidth: 1, borderBottomColor: T.line },
   headerRow: { flexDirection: 'row', alignItems: 'center', paddingTop: SPACING.sm, paddingBottom: SPACING.sm, gap: SPACING.md },
   modeRow: { paddingBottom: SPACING.md },
-  headerGreeting: { fontSize: 20, fontWeight: FONTS.bold, color: T.ink },
+  headerGreeting: { fontSize: 22, color: T.ink, ...display(700) },
   headerSub: { fontSize: 12, color: T.ink3, marginTop: 2, textTransform: 'capitalize' },
 
   profilePill: {
@@ -606,7 +606,7 @@ const styles = StyleSheet.create({
   balancePositive: { backgroundColor: '#10B981' },
   balanceNegative: { backgroundColor: T.brand },
   balanceLabel: { color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: FONTS.semibold, letterSpacing: 1 },
-  balanceValue: { color: '#fff', fontSize: 32, fontWeight: FONTS.bold, marginTop: 4 },
+  balanceValue: { color: '#fff', fontSize: 32, marginTop: 4, ...display(700) },
   balanceRow: { flexDirection: 'row', alignItems: 'center', marginTop: SPACING.md },
   balanceItem: { flex: 1 },
   balanceItemLabel: { fontSize: 11, color: 'rgba(255,255,255,0.85)', fontWeight: FONTS.medium },

@@ -5,10 +5,8 @@ import {
   StyleSheet,
   Modal,
   TouchableOpacity,
-  Image,
   ActivityIndicator,
   Alert,
-  Platform,
   Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -16,6 +14,8 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { T, RADIUS, FONTS, SPACING, HIT_SLOP, TOUCH_TARGET } from '../theme';
 import { getApiUrl } from '../api/client';
+import ZoomableImage from './ZoomableImage';
+import PdfViewer from './PdfViewer';
 
 export default function AttachmentViewer({ visible, attachment, onClose, onDelete, canDelete }) {
   const [busy, setBusy] = useState(false);
@@ -26,6 +26,7 @@ export default function AttachmentViewer({ visible, attachment, onClose, onDelet
     ? attachment.fileUrl
     : `${apiUrl}${attachment.fileUrl}`;
   const isImage = attachment.kind === 'image' || (attachment.mimeType || '').startsWith('image/');
+  const isPdf = attachment.kind === 'pdf' || (attachment.mimeType || '') === 'application/pdf' || /\.pdf$/i.test(attachment.fileName || '');
   const { width, height } = Dimensions.get('window');
 
   const downloadToFile = async () => {
@@ -90,19 +91,15 @@ export default function AttachmentViewer({ visible, attachment, onClose, onDelet
 
         <View style={styles.body}>
           {isImage ? (
-            <Image
-              source={{ uri: fullUrl }}
-              style={{ width, height: height - 200 }}
-              resizeMode="contain"
-            />
+            <ZoomableImage uri={fullUrl} width={width} height={height - 200} />
+          ) : isPdf ? (
+            <PdfViewer uri={fullUrl} fileName={attachment.fileName} />
           ) : (
             <View style={styles.nonImageBox}>
-              <Text style={styles.nonImageIcon}>
-                {attachment.kind === 'pdf' ? '📄' : '📎'}
-              </Text>
+              <Text style={styles.nonImageIcon}>📎</Text>
               <Text style={styles.nonImageTitle}>{attachment.fileName}</Text>
               <Text style={styles.nonImageSub}>
-                Fișierele {attachment.kind === 'pdf' ? 'PDF' : 'de acest tip'} se deschid în aplicația implicită.
+                Fișierele de acest tip se deschid în aplicația implicită.
               </Text>
               <TouchableOpacity
                 style={styles.openBtn}

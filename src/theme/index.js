@@ -1,5 +1,32 @@
 import { Platform } from 'react-native';
 
+// Font family names mirror the @expo-google-fonts packages. Each weight
+// is a separate font file on the device, so reference it directly via
+// `fontFamily` rather than relying on `fontWeight` (RN does not blend
+// fontWeight with custom fonts reliably).
+export const FONT_FAMILY = {
+  display: {
+    500: 'BricolageGrotesque_500Medium',
+    600: 'BricolageGrotesque_600SemiBold',
+    700: 'BricolageGrotesque_700Bold',
+  },
+  body: {
+    400: 'PlusJakartaSans_400Regular',
+    500: 'PlusJakartaSans_500Medium',
+    600: 'PlusJakartaSans_600SemiBold',
+    700: 'PlusJakartaSans_700Bold',
+  },
+};
+
+// Display heading style — Bricolage Grotesque with tight tracking.
+// Use this on greetings, app title, hero balance, screen titles. Body
+// text keeps the system font so existing fontWeight styles still work.
+export function display(weight = 700, extra = {}) {
+  const w = String(weight);
+  const family = FONT_FAMILY.display[w] || FONT_FAMILY.display[700];
+  return { fontFamily: family, letterSpacing: -0.3, ...extra };
+}
+
 export const T = {
   brand: '#FF6B1A',
   brandSoft: '#ff8a47',

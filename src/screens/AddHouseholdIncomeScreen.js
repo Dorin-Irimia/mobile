@@ -7,6 +7,7 @@ import useStore from '../store';
 import { T, RADIUS, FONTS, SHADOW, SPACING, useResponsive, HIT_SLOP, HIT_SLOP_LG, TOUCH_TARGET, IS_IOS } from '../theme';
 import DateField from '../components/DateField';
 import CustomFieldsEditor from '../components/CustomFieldsEditor';
+import SuggestInput from '../components/SuggestInput';
 import { getCategoriesFor } from '../utils/categories';
 
 const RECURRING = [
@@ -23,6 +24,7 @@ export default function AddHouseholdIncomeScreen({ navigation, route }) {
   const households = useStore(s => s.households);
   const householdIncomes = useStore(s => s.householdIncomes);
   const addHouseholdIncome = useStore(s => s.addHouseholdIncome);
+  const recordSuggestions = useStore(s => s.recordSuggestions);
   const updateHouseholdIncome = useStore(s => s.updateHouseholdIncome);
   const selectedHouseholdId = useStore(s => s.selectedHouseholdId);
   const customCategories = useStore(s => s.customCategories);
@@ -72,6 +74,11 @@ export default function AddHouseholdIncomeScreen({ navigation, route }) {
       };
       if (isEdit) await updateHouseholdIncome(incomeId, payload);
       else await addHouseholdIncome(payload);
+      recordSuggestions({
+        incomeTitle: title.trim(),
+        source: source.trim(),
+        note: notes.trim(),
+      }).catch(() => {});
       navigation.goBack();
     } catch (e) {
       Alert.alert('Eroare', e?.response?.data?.error || 'Nu s-a putut salva.');
@@ -131,7 +138,7 @@ export default function AddHouseholdIncomeScreen({ navigation, route }) {
 
           <View style={styles.card}>
             <Text style={styles.label}>Titlu *</Text>
-            <TextInput style={styles.input} value={title} onChangeText={setTitle} placeholder='Ex: "Salariu martie"' placeholderTextColor={T.ink4} />
+            <SuggestInput field="incomeTitle" style={styles.input} value={title} onChangeText={setTitle} placeholder='Ex: "Salariu martie"' placeholderTextColor={T.ink4} />
             <View style={styles.row2}>
               <View style={{ flex: 1.5 }}>
                 <Text style={styles.label}>Sumă *</Text>
@@ -152,7 +159,7 @@ export default function AddHouseholdIncomeScreen({ navigation, route }) {
 
           <View style={styles.card}>
             <Text style={styles.label}>Sursă (opțional)</Text>
-            <TextInput style={styles.input} value={source} onChangeText={setSource} placeholder='Ex: "Firma X SRL", "Chiriaș Apt2"' placeholderTextColor={T.ink4} />
+            <SuggestInput field="source" style={styles.input} value={source} onChangeText={setSource} placeholder='Ex: "Firma X SRL", "Chiriaș Apt2"' placeholderTextColor={T.ink4} />
           </View>
 
           <View style={styles.card}>

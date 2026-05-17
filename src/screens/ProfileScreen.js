@@ -32,6 +32,7 @@ import {
   HIT_SLOP_LG,
   TOUCH_TARGET,
   IS_IOS,
+  display,
 } from '../theme';
 import { getApiUrl } from '../api/client';
 import packageJson from '../../package.json';
@@ -1212,11 +1213,11 @@ const styles = StyleSheet.create({
   },
   avatarEditIcon: { fontSize: 14 },
   headerName: {
-    fontSize: 18,
-    fontWeight: FONTS.bold,
+    fontSize: 22,
     color: '#fff',
     marginTop: SPACING.sm,
     paddingHorizontal: SPACING.lg,
+    ...display(700),
   },
   headerEmail: {
     fontSize: 13,

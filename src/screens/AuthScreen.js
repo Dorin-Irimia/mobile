@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import useStore from '../store';
-import { T, RADIUS, SHADOW, FONTS, useResponsive } from '../theme';
+import { T, RADIUS, SHADOW, FONTS, useResponsive, display } from '../theme';
 import ServerConfigScreen from './ServerConfigScreen';
 
 export default function AuthScreen() {
@@ -350,10 +350,10 @@ const styles = StyleSheet.create({
     lineHeight: 48,
   },
   appTitle: {
-    fontSize: 28,
-    fontWeight: FONTS.bold,
+    fontSize: 32,
     color: T.ink,
     marginBottom: 6,
+    ...display(700, { letterSpacing: -0.6 }),
   },
   appSub: {
     fontSize: 14,

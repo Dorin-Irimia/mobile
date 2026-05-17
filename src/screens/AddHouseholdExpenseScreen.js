@@ -22,6 +22,7 @@ import CustomFieldsEditor from '../components/CustomFieldsEditor';
 import LocationField from '../components/LocationField';
 import DateField from '../components/DateField';
 import TimeField from '../components/TimeField';
+import SuggestInput from '../components/SuggestInput';
 import { getCategoriesFor } from '../utils/categories';
 
 const SPLIT_OPTIONS = [
@@ -41,6 +42,7 @@ export default function AddHouseholdExpenseScreen({ navigation, route }) {
   const households = useStore(s => s.households);
   const householdExpenses = useStore(s => s.householdExpenses);
   const addHouseholdExpense = useStore(s => s.addHouseholdExpense);
+  const recordSuggestions = useStore(s => s.recordSuggestions);
   const updateHouseholdExpense = useStore(s => s.updateHouseholdExpense);
   const selectedHouseholdId = useStore(s => s.selectedHouseholdId);
   const customCategories = useStore(s => s.customCategories);
@@ -113,6 +115,12 @@ export default function AddHouseholdExpenseScreen({ navigation, route }) {
       } else {
         await addHouseholdExpense(fd);
       }
+      recordSuggestions({
+        expenseTitle: title.trim(),
+        merchant: merchant.trim(),
+        location: location.trim(),
+        note: notes.trim(),
+      }).catch(() => {});
       navigation.goBack();
     } catch (e) {
       Alert.alert('Eroare', e?.response?.data?.error || 'Nu s-a putut salva.');
@@ -198,7 +206,8 @@ export default function AddHouseholdExpenseScreen({ navigation, route }) {
           {/* Title + amount */}
           <View style={styles.card}>
             <Text style={styles.label}>Titlu *</Text>
-            <TextInput
+            <SuggestInput
+              field="expenseTitle"
               style={styles.input}
               value={title}
               onChangeText={setTitle}
@@ -272,7 +281,8 @@ export default function AddHouseholdExpenseScreen({ navigation, route }) {
           {/* Merchant + location */}
           <View style={styles.card}>
             <Text style={styles.label}>Magazin / furnizor (opțional)</Text>
-            <TextInput
+            <SuggestInput
+              field="merchant"
               style={styles.input}
               value={merchant}
               onChangeText={setMerchant}

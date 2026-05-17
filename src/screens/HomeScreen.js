@@ -27,6 +27,7 @@ import {
   HIT_SLOP,
   TOUCH_TARGET,
   IS_IOS,
+  display,
 } from '../theme';
 import { EmptyState, StatusBadge } from '../components/ui';
 import { OnlineDot } from '../components/NetworkBadge';
@@ -293,7 +294,7 @@ export default function HomeScreen({ navigation }) {
           <View style={styles.heroTop}>
             <View style={styles.headerLeft}>
               <Text style={styles.todayStr}>{getTodayStr()}</Text>
-              <Text style={[styles.greeting, { fontSize: fScale(24) }]}>
+              <Text style={[styles.greeting, display(700), { fontSize: fScale(24) }]}>
                 {getGreeting()}, {firstName}
               </Text>
             </View>

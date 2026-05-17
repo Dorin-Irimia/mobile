@@ -10,6 +10,7 @@ import TimeField from '../components/TimeField';
 import LocationField from '../components/LocationField';
 import { promptAddToDeviceCalendar } from '../utils/deviceCalendar';
 import { scheduleDeadlineNotifications } from '../utils/deadlineNotifications';
+import SuggestInput from '../components/SuggestInput';
 
 const TYPES = [
   { key: 'curierat',    label: '📦 Curierat ',    color: '#F59E0B' },
@@ -29,6 +30,7 @@ export default function AddHouseholdEventScreen({ navigation, route }) {
   const householdEvents = useStore(s => s.householdEvents);
   const addHouseholdEvent = useStore(s => s.addHouseholdEvent);
   const updateHouseholdEvent = useStore(s => s.updateHouseholdEvent);
+  const recordSuggestions = useStore(s => s.recordSuggestions);
   const selectedHouseholdId = useStore(s => s.selectedHouseholdId);
   const { isTablet, hPad, maxContentWidth } = useResponsive();
 
@@ -70,6 +72,12 @@ export default function AddHouseholdEventScreen({ navigation, route }) {
       const saved = isEdit
         ? await updateHouseholdEvent(eventId, payload)
         : await addHouseholdEvent(payload);
+
+      recordSuggestions({
+        eventTitle: title.trim(),
+        location: location.trim(),
+        note: notes.trim(),
+      }).catch(() => {});
 
       const evId = saved?.id || saved?.clientId || eventId || `${Date.now()}`;
       scheduleDeadlineNotifications({
@@ -155,7 +163,7 @@ export default function AddHouseholdEventScreen({ navigation, route }) {
 
           <View style={styles.card}>
             <Text style={styles.label}>Titlu *</Text>
-            <TextInput style={styles.input} value={title} onChangeText={setTitle} placeholder='Ex: "Curier eMag", "Vizită părinți"' placeholderTextColor={T.ink4} />
+            <SuggestInput field="eventTitle" style={styles.input} value={title} onChangeText={setTitle} placeholder='Ex: "Curier eMag", "Vizită părinți"' placeholderTextColor={T.ink4} />
           </View>
 
           <View style={styles.card}>

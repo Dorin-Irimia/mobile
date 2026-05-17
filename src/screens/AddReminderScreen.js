@@ -130,6 +130,11 @@ export default function AddReminderScreen({ navigation, route }) {
         data: { relatedType: 'Reminder', relatedId: reminderId },
       }).catch(() => {});
 
+      useStore.getState().recordSuggestions?.({
+        reminderTitle: title.trim(),
+        note: notes.trim(),
+      }).catch(() => {});
+
       // Offer to also add to the phone calendar.
       await promptAddToDeviceCalendar({
         title: title.trim(),

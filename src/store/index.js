@@ -15,6 +15,10 @@ import { processSyncQueue, pullServerState } from '../utils/syncManager';
 import { DEFAULT_QUICK_ACTION_IDS, normalizeQuickActionIds } from '../utils/quickActions';
 import { OfflineActionError } from '../utils/onlineGate';
 import { cancelDeadlineNotifications } from '../utils/deadlineNotifications';
+import {
+  loadAllSuggestions, recordSuggestions as recordSuggestionsToDisk,
+  loadRecentSearches, pushRecentSearch, clearRecentSearches, removeRecentSearch,
+} from '../utils/suggestionsStore';
 
 const PENDING_REGISTRATION_KEY = 'pendingRegistration';
 
@@ -237,6 +241,8 @@ const useStore = create((set, get) => ({
   quickActionIds: DEFAULT_QUICK_ACTION_IDS,
   customCategories: [],
   monthStartDay: 1, // 1..28 (calendar day on which a billing month begins)
+  suggestions: {},           // { [field]: [{ value, count, ts }] }
+  recentSearches: [],        // recent query strings, newest first
   isLoading: false,
   isOnline: true,
   isSyncing: false,
@@ -779,6 +785,41 @@ const useStore = create((set, get) => ({
     return clean;
   },
 
+  // ── Suggestions + recent searches ─────────────────────────────────────────
+  loadSuggestionsAndRecents: async () => {
+    const [suggestions, recentSearches] = await Promise.all([
+      loadAllSuggestions(),
+      loadRecentSearches(),
+    ]);
+    set({ suggestions, recentSearches });
+    return { suggestions, recentSearches };
+  },
+
+  recordSuggestions: async (entries) => {
+    await recordSuggestionsToDisk(entries);
+    const fresh = await loadAllSuggestions();
+    set({ suggestions: fresh });
+    return fresh;
+  },
+
+  pushRecentSearch: async (query) => {
+    const updated = await pushRecentSearch(query);
+    if (updated) set({ recentSearches: updated });
+    return updated;
+  },
+
+  removeRecentSearch: async (query) => {
+    const updated = await removeRecentSearch(query);
+    set({ recentSearches: updated });
+    return updated;
+  },
+
+  clearRecentSearches: async () => {
+    const updated = await clearRecentSearches();
+    set({ recentSearches: updated });
+    return updated;
+  },
+
   importHouseholdIncomes: async (items, householdId) => {
     const arr = Array.isArray(items) ? items : [];
     let imported = 0;
@@ -1076,6 +1117,7 @@ const useStore = create((set, get) => ({
           customCategories: Array.isArray(customCats) ? customCats : [],
           monthStartDay: Math.min(28, Math.max(1, Number(savedMonthStart) || 1)),
         });
+        get().loadSuggestionsAndRecents().catch(() => {});
 
         const queue = await getQueue();
         if (queue.length > 0) set({ pendingCount: queue.length });
