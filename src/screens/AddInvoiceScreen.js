@@ -128,17 +128,19 @@ export default function AddInvoiceScreen({ navigation, route }) {
       if (Object.keys(customFields).length > 0) {
         fd.append('customFields', JSON.stringify(customFields));
       }
-      if (syncToHousehold && syncHouseholdId) {
+      // Sync to household: see AddFuelScreen for the rationale — online lets
+      // the server own the link, offline we replicate the spend locally.
+      const isOnline = useStore.getState().isOnline;
+      const mapCategory = {
+        service: 'transport',
+        combustibil: 'transport',
+        asigurare: 'transport',
+        anvelope: 'transport',
+        piese: 'transport',
+        altele: 'transport',
+      };
+      if (syncToHousehold && syncHouseholdId && isOnline) {
         fd.append('syncToHouseholdId', syncHouseholdId);
-        // Map vehicle invoice categories onto household categories.
-        const mapCategory = {
-          service: 'transport',
-          combustibil: 'transport',
-          asigurare: 'transport',
-          anvelope: 'transport',
-          piese: 'transport',
-          altele: 'transport',
-        };
         fd.append('syncCategory', mapCategory[category] || 'transport');
       }
       attachments.forEach((a, i) => {
@@ -149,6 +151,27 @@ export default function AddInvoiceScreen({ navigation, route }) {
         });
       });
       await addInvoice(fd);
+
+      if (syncToHousehold && syncHouseholdId && !isOnline) {
+        try {
+          const vehicle = ownedAndShared.find(v => v.id === vehicleId);
+          const expFd = new FormData();
+          expFd.append('householdId', syncHouseholdId);
+          expFd.append('title', `${title.trim()} (${vehicle?.plate || 'mașină'})`);
+          expFd.append('amount', String(parseFloat(amount)));
+          expFd.append('currency', currency || 'RON');
+          expFd.append('category', mapCategory[category] || 'transport');
+          expFd.append('date', date);
+          if (time) expFd.append('time', time);
+          if (merchant.trim()) expFd.append('merchant', merchant.trim());
+          if (location.trim()) expFd.append('location', location.trim());
+          expFd.append('notes', `Sincronizat offline din facturi auto`);
+          expFd.append('source', 'invoice');
+          await useStore.getState().addHouseholdExpense(expFd);
+        } catch (syncErr) {
+          console.warn('Offline invoice→household sync failed:', syncErr?.message);
+        }
+      }
       recordSuggestions({
         invoiceTitle: title.trim(),
         merchant: merchant.trim(),

@@ -1,5 +1,6 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
+import NetInfo from '@react-native-community/netinfo';
 
 // Tailscale IP — funcționează oriunde are telefonul internet, nu se schimbă
 // la reboot router. Pentru testare locală fără VPN, schimbă din ServerConfig
@@ -8,6 +9,14 @@ export const DEFAULT_API_URL = 'http://100.121.100.74:3002';
 const API_URL_KEY = 'api_server_url';
 
 let _apiUrl = DEFAULT_API_URL;
+
+// Cached NetInfo state — refreshed by NetInfo subscriber below. We default to
+// `true` so the very first request (before the listener fires) isn't dropped.
+let _hasNetwork = true;
+NetInfo.addEventListener(state => { _hasNetwork = !!state.isConnected; });
+NetInfo.fetch().then(state => { _hasNetwork = !!state.isConnected; }).catch(() => {});
+
+export function hasNetwork() { return _hasNetwork; }
 
 export async function loadApiUrl() {
   try {
@@ -25,10 +34,22 @@ export function getApiUrl() { return _apiUrl; }
 
 export { _apiUrl as API_URL };
 
-const api = axios.create({ timeout: 8000 });
+// 4s overall request timeout — long enough for slow cellular, short enough that
+// the UI never sits with a spinner for "8 seconds while it eventually fails".
+const api = axios.create({ timeout: 4000 });
 
 api.interceptors.request.use(async (config) => {
   config.baseURL = `${_apiUrl}/api`;
+  // Short-circuit when the device has no network. This stops every request
+  // from waiting the full timeout when we already know it'll fail.
+  if (_hasNetwork === false) {
+    return Promise.reject({
+      message: 'No network',
+      code: 'OFFLINE',
+      isOfflineShortCircuit: true,
+      config,
+    });
+  }
   try {
     const token = await SecureStore.getItemAsync('accessToken');
     if (token) config.headers.Authorization = `Bearer ${token}`;

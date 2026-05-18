@@ -38,6 +38,7 @@ export default function ServiceHistoryScreen({ navigation, route }) {
   const vehicles = useStore(s => s.vehicles);
   const selectedVehicleId = useStore(s => s.selectedVehicleId);
   const records = useStore(s => s.serviceRecords);
+  const isOnline = useStore(s => s.isOnline);
   const fetchServiceRecords = useStore(s => s.fetchServiceRecords);
   const deleteServiceRecord = useStore(s => s.deleteServiceRecord);
 
@@ -45,7 +46,8 @@ export default function ServiceHistoryScreen({ navigation, route }) {
   const vehicle = effectiveVehicleId ? vehicles.find(v => v.id === effectiveVehicleId) : null;
 
   const [filter, setFilter] = useState('all');
-  const [loading, setLoading] = useState(true);
+  // Don't block render if we already have any records cached.
+  const [loading, setLoading] = useState((records || []).length === 0);
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {

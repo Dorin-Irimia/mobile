@@ -79,7 +79,11 @@ export default function BudgetTrackerScreen({ navigation }) {
   const household = households.find(h => h.id === selectedHouseholdId) || households[0];
   const householdId = household?.id;
 
-  const [loading, setLoading] = useState(true);
+  // Show full spinner only when we have absolutely nothing to render. Otherwise
+  // we draw whatever's in cache instantly and refresh in the background — feels
+  // way snappier on flaky / offline connections.
+  const hasAnyData = !!(summary && summary.categories);
+  const [loading, setLoading] = useState(!hasAnyData);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {

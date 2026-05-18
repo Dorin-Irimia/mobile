@@ -152,6 +152,7 @@ export default function FriendsChatScreen({ navigation, route }) {
   const friendId = friend?.id;
 
   const me = useStore(s => s.user);
+  const isOnline = useStore(s => s.isOnline);
   const messages = useStore(s => s.chatByFriend?.[friendId] || []);
   const fetchChatMessages = useStore(s => s.fetchChatMessages);
   const sendChatMessage = useStore(s => s.sendChatMessage);
@@ -211,12 +212,25 @@ export default function FriendsChatScreen({ navigation, route }) {
   const send = async () => {
     const text = input.trim();
     if (!text || sending) return;
+    if (!isOnline) {
+      Alert.alert(
+        'Offline',
+        'Pentru a trimite mesaje ai nevoie de conexiune la internet. Mesajele nu se stochează local și nu sunt trimise mai târziu.',
+      );
+      return;
+    }
     setSending(true);
     setInput('');
     try {
       await sendChatMessage(friendId, { text, kind: 'text' });
     } catch (e) {
-      Alert.alert('Eroare', e?.response?.data?.error || 'Mesajul nu a fost trimis.');
+      // Restore the text so the user can try again.
+      setInput(text);
+      if (e?.offline) {
+        Alert.alert('Offline', e.message || 'Conectează-te la internet ca să trimiți mesaje.');
+      } else {
+        Alert.alert('Eroare', e?.response?.data?.error || 'Mesajul nu a fost trimis.');
+      }
     } finally {
       setSending(false);
     }
@@ -334,19 +348,31 @@ export default function FriendsChatScreen({ navigation, route }) {
           </ScrollView>
         )}
 
+        {!isOnline && (
+          <View style={styles.offlineBanner}>
+            <Text style={styles.offlineBannerText}>
+              📴 Offline — mesajele se pot trimite doar cu internet
+            </Text>
+          </View>
+        )}
+
         <View style={styles.composer}>
           <TextInput
             value={input}
             onChangeText={setInput}
-            placeholder="Scrie un mesaj…"
+            placeholder={isOnline ? 'Scrie un mesaj…' : 'Conectează-te ca să poți scrie…'}
             placeholderTextColor={T.ink4}
             multiline
-            style={styles.composerInput}
+            editable={isOnline}
+            style={[styles.composerInput, !isOnline && { opacity: 0.6 }]}
           />
           <TouchableOpacity
-            disabled={!input.trim() || sending}
+            disabled={!input.trim() || sending || !isOnline}
             onPress={send}
-            style={[styles.sendBtn, (!input.trim() || sending) && { backgroundColor: T.ink4, shadowOpacity: 0 }]}
+            style={[
+              styles.sendBtn,
+              (!input.trim() || sending || !isOnline) && { backgroundColor: T.ink4, shadowOpacity: 0 },
+            ]}
             activeOpacity={0.85}
           >
             {sending ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.sendArrow}>→</Text>}
@@ -424,6 +450,14 @@ const styles = StyleSheet.create({
   expAmount: { fontSize: 18, fontWeight: FONTS.bold, letterSpacing: -0.3, lineHeight: 20 },
   expCurrency: { fontSize: 9, fontWeight: FONTS.bold, marginTop: 2 },
 
+  offlineBanner: {
+    paddingHorizontal: 12, paddingVertical: 8,
+    backgroundColor: T.warnTint,
+    borderTopWidth: 1, borderTopColor: T.warn + '55',
+    borderBottomWidth: 1, borderBottomColor: T.warn + '55',
+    alignItems: 'center',
+  },
+  offlineBannerText: { fontSize: 11, color: T.warn, fontWeight: FONTS.bold },
   composer: {
     flexDirection: 'row', alignItems: 'flex-end', gap: 8,
     backgroundColor: T.card,

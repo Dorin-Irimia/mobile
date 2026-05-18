@@ -29,6 +29,7 @@ export default function BillsScreen({ navigation }) {
   const households = useStore(s => s.households);
   const selectedHouseholdId = useStore(s => s.selectedHouseholdId);
   const bills = useStore(s => s.householdBills);
+  const isOnline = useStore(s => s.isOnline);
   const fetchHouseholdBills = useStore(s => s.fetchHouseholdBills);
   const payHouseholdBill = useStore(s => s.payHouseholdBill);
   const deleteHouseholdBill = useStore(s => s.deleteHouseholdBill);
@@ -37,7 +38,8 @@ export default function BillsScreen({ navigation }) {
   const householdId = household?.id;
 
   const [filter, setFilter] = useState('all');
-  const [loading, setLoading] = useState(true);
+  // Show full spinner only when we have nothing in cache yet.
+  const [loading, setLoading] = useState((bills || []).length === 0);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {

@@ -163,7 +163,13 @@ export default function AddFuelScreen({ navigation, route }) {
       if (Object.keys(customFields).length > 0) {
         fd.append('customFields', JSON.stringify(customFields));
       }
-      if (syncToHousehold && syncHouseholdId) {
+      // Sync to household: when online we hand it to the server (server creates
+      // the linked HouseholdExpense atomically). When offline we replicate the
+      // same outcome client-side by creating a second optimistic + queued
+      // HouseholdExpense — that way the user sees the spend in the house wallet
+      // immediately even without network.
+      const isOnline = useStore.getState().isOnline;
+      if (syncToHousehold && syncHouseholdId && isOnline) {
         fd.append('syncToHouseholdId', syncHouseholdId);
         fd.append('syncCategory', 'transport');
       }
@@ -175,6 +181,27 @@ export default function AddFuelScreen({ navigation, route }) {
         });
       });
       await addFuelLog(fd);
+
+      if (syncToHousehold && syncHouseholdId && !isOnline) {
+        try {
+          const computedTotalLocal = parseFloat(liters) * parseFloat(pricePerL);
+          const expFd = new FormData();
+          expFd.append('householdId', syncHouseholdId);
+          expFd.append('title', `Alimentare ${(station || '').trim()} · ${(selectedVehicle?.plate) || 'mașină'}`);
+          expFd.append('amount', String(computedTotalLocal));
+          expFd.append('currency', 'RON');
+          expFd.append('category', 'transport');
+          expFd.append('date', date);
+          if (time) expFd.append('time', time);
+          if (station.trim()) expFd.append('merchant', station.trim());
+          if (location.trim()) expFd.append('location', location.trim());
+          expFd.append('notes', `Sincronizat offline din alimentări · ${parseFloat(liters).toFixed(1)}L`);
+          expFd.append('source', 'fuel');
+          await useStore.getState().addHouseholdExpense(expFd);
+        } catch (syncErr) {
+          console.warn('Offline fuel→household sync failed:', syncErr?.message);
+        }
+      }
       recordSuggestions({
         station: station.trim(),
         location: location.trim(),

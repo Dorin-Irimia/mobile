@@ -95,7 +95,11 @@ export default function FuelAnalyticsScreen({ navigation, route }) {
   const effectiveVehicleId = vehicleId || selectedVehicleId || null;
   const vehicle = effectiveVehicleId ? vehicles.find(v => v.id === effectiveVehicleId) : null;
 
-  const [loading, setLoading] = useState(true);
+  // Don't block render if we already have fuelLogs cached for this vehicle.
+  const initialHasData = (fuelLogs || []).some(
+    f => !effectiveVehicleId || f.vehicleId === effectiveVehicleId
+  );
+  const [loading, setLoading] = useState(!initialHasData);
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {

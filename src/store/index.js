@@ -972,6 +972,12 @@ const useStore = create((set, get) => ({
       }
       const serverState = await pullServerState();
       await get().applyServerState(serverState);
+
+      // Pull the new entity types that aren't bundled in /sync/state yet —
+      // bills, service records and budget categories. Best-effort.
+      try { await get().fetchHouseholdBills(); } catch {}
+      try { await get().fetchServiceRecords(); } catch {}
+      try { await get().fetchBudgetCategories(); } catch {}
     } finally {
       const remaining = await getQueue();
       set({ isSyncing: false, pendingCount: remaining.length });
@@ -2081,9 +2087,45 @@ const useStore = create((set, get) => ({
     }
   },
 
+  // Service records — full offline: optimistic write to cache + queue flush
+  // when the device reconnects.
   addServiceRecord: async (payload) => {
-    if (!get().isOnline) throw new OfflineActionError();
     const clientId = createClientId('srv');
+    const me = get().user;
+    if (!get().isOnline) {
+      const optimistic = {
+        id: `local-${clientId}`,
+        clientId,
+        userId: me?.id,
+        user: me ? { id: me.id, name: me.name, email: me.email, avatar: me.avatar } : null,
+        vehicleId: payload.vehicleId,
+        date: payload.date,
+        km: payload.km ?? null,
+        type: payload.type,
+        title: payload.title,
+        provider: payload.provider || null,
+        cost: Number(payload.cost || 0),
+        upcoming: !!payload.upcoming,
+        notes: payload.notes || null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        _offline: true,
+      };
+      set(s => ({ serviceRecords: [optimistic, ...s.serviceRecords] }));
+      await saveCache('serviceRecords', get().serviceRecords);
+      await enqueue({
+        entity: 'serviceRecords',
+        action: 'create',
+        method: 'POST',
+        endpoint: '/service-records',
+        payload: { ...payload, clientId },
+        localId: clientId,
+        clientId,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
+      return optimistic;
+    }
     const { data } = await api.post('/service-records', { ...payload, clientId });
     set(s => ({ serviceRecords: [data, ...s.serviceRecords] }));
     await saveCache('serviceRecords', get().serviceRecords);
@@ -2091,7 +2133,25 @@ const useStore = create((set, get) => ({
   },
 
   updateServiceRecord: async (id, patch) => {
-    if (!get().isOnline) throw new OfflineActionError();
+    if (!get().isOnline) {
+      set(s => ({
+        serviceRecords: s.serviceRecords.map(r =>
+          r.id === id ? { ...r, ...patch, updatedAt: new Date().toISOString(), _offline: true } : r
+        ),
+      }));
+      await saveCache('serviceRecords', get().serviceRecords);
+      await enqueue({
+        entity: 'serviceRecords',
+        action: 'update',
+        method: 'PUT',
+        endpoint: `/service-records/${id}`,
+        payload: patch,
+        localId: id,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
+      return get().serviceRecords.find(r => r.id === id);
+    }
     const { data } = await api.put(`/service-records/${id}`, patch);
     set(s => ({ serviceRecords: s.serviceRecords.map(r => r.id === id ? data : r) }));
     await saveCache('serviceRecords', get().serviceRecords);
@@ -2099,7 +2159,28 @@ const useStore = create((set, get) => ({
   },
 
   deleteServiceRecord: async (id) => {
-    if (!get().isOnline) throw new OfflineActionError();
+    const item = get().serviceRecords.find(r => r.id === id);
+    if (!get().isOnline) {
+      // If the record was never synced, drop it locally without queueing.
+      if (item?._offline && String(id).startsWith('local-')) {
+        set(s => ({ serviceRecords: s.serviceRecords.filter(r => r.id !== id) }));
+        await saveCache('serviceRecords', get().serviceRecords);
+        return;
+      }
+      set(s => ({ serviceRecords: s.serviceRecords.filter(r => r.id !== id) }));
+      await saveCache('serviceRecords', get().serviceRecords);
+      await enqueue({
+        entity: 'serviceRecords',
+        action: 'delete',
+        method: 'DELETE',
+        endpoint: `/service-records/${id}`,
+        payload: null,
+        localId: id,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
+      return;
+    }
     await api.delete(`/service-records/${id}`);
     set(s => ({ serviceRecords: s.serviceRecords.filter(r => r.id !== id) }));
     await saveCache('serviceRecords', get().serviceRecords);
@@ -2128,9 +2209,48 @@ const useStore = create((set, get) => ({
     }
   },
 
+  // Household bills — full offline. Add/edit/pay/delete are all queued and
+  // flushed on reconnect. "Pay" is a state transition (status → paid) that
+  // can also be applied optimistically.
   addHouseholdBill: async (payload) => {
-    if (!get().isOnline) throw new OfflineActionError();
     const clientId = createClientId('bill');
+    const me = get().user;
+    if (!get().isOnline) {
+      const optimistic = {
+        id: `local-${clientId}`,
+        clientId,
+        userId: me?.id,
+        user: me ? { id: me.id, name: me.name, email: me.email, avatar: me.avatar } : null,
+        householdId: payload.householdId,
+        provider: payload.provider,
+        name: payload.name,
+        icon: payload.icon || '📄',
+        color: payload.color || '#6B7280',
+        amount: Number(payload.amount || 0),
+        currency: payload.currency || 'RON',
+        dueDate: payload.dueDate,
+        status: payload.status || 'due',
+        recurring: payload.recurring || 'lunar',
+        notes: payload.notes || null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        _offline: true,
+      };
+      set(s => ({ householdBills: [optimistic, ...s.householdBills] }));
+      await saveCache('householdBills', get().householdBills);
+      await enqueue({
+        entity: 'householdBills',
+        action: 'create',
+        method: 'POST',
+        endpoint: '/household-bills',
+        payload: { ...payload, clientId },
+        localId: clientId,
+        clientId,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
+      return optimistic;
+    }
     const { data } = await api.post('/household-bills', { ...payload, clientId });
     set(s => ({ householdBills: [data, ...s.householdBills] }));
     await saveCache('householdBills', get().householdBills);
@@ -2138,7 +2258,25 @@ const useStore = create((set, get) => ({
   },
 
   updateHouseholdBill: async (id, patch) => {
-    if (!get().isOnline) throw new OfflineActionError();
+    if (!get().isOnline) {
+      set(s => ({
+        householdBills: s.householdBills.map(b =>
+          b.id === id ? { ...b, ...patch, updatedAt: new Date().toISOString(), _offline: true } : b
+        ),
+      }));
+      await saveCache('householdBills', get().householdBills);
+      await enqueue({
+        entity: 'householdBills',
+        action: 'update',
+        method: 'PUT',
+        endpoint: `/household-bills/${id}`,
+        payload: patch,
+        localId: id,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
+      return get().householdBills.find(b => b.id === id);
+    }
     const { data } = await api.put(`/household-bills/${id}`, patch);
     set(s => ({ householdBills: s.householdBills.map(b => b.id === id ? data : b) }));
     await saveCache('householdBills', get().householdBills);
@@ -2146,7 +2284,28 @@ const useStore = create((set, get) => ({
   },
 
   payHouseholdBill: async (id) => {
-    if (!get().isOnline) throw new OfflineActionError();
+    const today = new Date().toISOString().slice(0, 10);
+    if (!get().isOnline) {
+      set(s => ({
+        householdBills: s.householdBills.map(b =>
+          b.id === id
+            ? { ...b, status: 'paid', paidDate: today, updatedAt: new Date().toISOString(), _offline: true }
+            : b
+        ),
+      }));
+      await saveCache('householdBills', get().householdBills);
+      await enqueue({
+        entity: 'householdBills',
+        action: 'pay',
+        method: 'POST',
+        endpoint: `/household-bills/${id}/pay`,
+        payload: null,
+        localId: id,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
+      return get().householdBills.find(b => b.id === id);
+    }
     const { data } = await api.post(`/household-bills/${id}/pay`);
     set(s => ({ householdBills: s.householdBills.map(b => b.id === id ? data : b) }));
     await saveCache('householdBills', get().householdBills);
@@ -2154,7 +2313,27 @@ const useStore = create((set, get) => ({
   },
 
   deleteHouseholdBill: async (id) => {
-    if (!get().isOnline) throw new OfflineActionError();
+    const item = get().householdBills.find(b => b.id === id);
+    if (!get().isOnline) {
+      if (item?._offline && String(id).startsWith('local-')) {
+        set(s => ({ householdBills: s.householdBills.filter(b => b.id !== id) }));
+        await saveCache('householdBills', get().householdBills);
+        return;
+      }
+      set(s => ({ householdBills: s.householdBills.filter(b => b.id !== id) }));
+      await saveCache('householdBills', get().householdBills);
+      await enqueue({
+        entity: 'householdBills',
+        action: 'delete',
+        method: 'DELETE',
+        endpoint: `/household-bills/${id}`,
+        payload: null,
+        localId: id,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
+      return;
+    }
     await api.delete(`/household-bills/${id}`);
     set(s => ({ householdBills: s.householdBills.filter(b => b.id !== id) }));
     await saveCache('householdBills', get().householdBills);
@@ -2198,12 +2377,58 @@ const useStore = create((set, get) => ({
     }
   },
 
+  // Compute a budget summary identical in shape to the server response, but
+  // from cached state. Used as an immediate first paint and as a fallback when
+  // the device is offline.
+  computeLocalBudgetSummary: (householdId, month) => {
+    const state = get();
+    const targetMonth = month && /^\d{4}-\d{2}$/.test(month)
+      ? month
+      : new Date().toISOString().slice(0, 7);
+    const monthStart = `${targetMonth}-01`;
+    const [y, m] = targetMonth.split('-').map(Number);
+    const monthEndDate = new Date(Date.UTC(y, m, 1));
+    const monthEnd = monthEndDate.toISOString().slice(0, 10);
+
+    const categories = (state.budgetCategories || []).filter(c => c.householdId === householdId);
+    const expenses = (state.householdExpenses || []).filter(e =>
+      e.householdId === householdId && (e.date || '') >= monthStart && (e.date || '') < monthEnd
+    );
+
+    const spentByCategory = {};
+    let totalSpent = 0;
+    expenses.forEach(e => {
+      const key = e.category || 'altele';
+      spentByCategory[key] = (spentByCategory[key] || 0) + Number(e.amount || 0);
+      totalSpent += Number(e.amount || 0);
+    });
+    const tracked = new Set(categories.map(c => c.key));
+    const otherSpent = Object.entries(spentByCategory)
+      .filter(([k]) => !tracked.has(k))
+      .reduce((s, [, v]) => s + v, 0);
+
+    const breakdown = categories.map(c => ({
+      ...c,
+      spent: Math.round((spentByCategory[c.key] || 0) * 100) / 100,
+    }));
+    return {
+      month: targetMonth,
+      categories: breakdown,
+      totalSpent: Math.round(totalSpent * 100) / 100,
+      otherSpent: Math.round(otherSpent * 100) / 100,
+    };
+  },
+
   fetchBudgetSummary: async (householdId, month) => {
     if (!householdId) return null;
+    // Always paint immediately from local state so the user sees data in <16ms.
+    const localSummary = get().computeLocalBudgetSummary(householdId, month);
+    set({ budgetSummary: localSummary });
+
     if (!get().isOnline) {
       const cached = await loadCache(`budgetSummary_${householdId}`);
       if (cached) set({ budgetSummary: cached });
-      return cached;
+      return cached || localSummary;
     }
     try {
       const { data } = await api.get('/budgets/summary', {
@@ -2215,33 +2440,132 @@ const useStore = create((set, get) => ({
     } catch {
       const cached = await loadCache(`budgetSummary_${householdId}`);
       if (cached) set({ budgetSummary: cached });
-      return cached;
+      return cached || localSummary;
     }
   },
 
+  // Budget categories support full offline use: create, edit, delete are all
+  // mirrored locally and queued to flush on reconnect. The optimistic items
+  // wear the `_offline: true` flag until the queue resolves them.
   upsertBudgetCategory: async (payload) => {
-    if (!get().isOnline) throw new OfflineActionError();
-    const { data } = await api.post('/budgets/categories', payload);
-    set(s => {
-      const exists = s.budgetCategories.some(c => c.id === data.id);
-      return {
-        budgetCategories: exists
-          ? s.budgetCategories.map(c => c.id === data.id ? data : c)
-          : [...s.budgetCategories, data],
+    const me = get().user;
+    if (!get().isOnline) {
+      const clientId = createClientId('bcat');
+      const optimistic = {
+        id: `local-${clientId}`,
+        clientId,
+        householdId: payload.householdId,
+        userId: me?.id,
+        user: me ? { id: me.id, name: me.name, email: me.email, avatar: me.avatar } : null,
+        key: payload.key,
+        label: payload.label,
+        icon: payload.icon || '📦',
+        color: payload.color || '#6B7280',
+        monthlyLimit: Number(payload.monthlyLimit || 0),
+        sortOrder: Number(payload.sortOrder || 0),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        _offline: true,
       };
-    });
-    return data;
+      set(s => {
+        // If a local copy with the same key already exists for this household,
+        // merge into it (this is an upsert, after all).
+        const existing = s.budgetCategories.find(
+          c => c.householdId === payload.householdId && c.key === payload.key
+        );
+        if (existing) {
+          return {
+            budgetCategories: s.budgetCategories.map(c =>
+              c === existing ? { ...c, ...optimistic, id: c.id } : c
+            ),
+          };
+        }
+        return { budgetCategories: [...s.budgetCategories, optimistic] };
+      });
+      await saveCache(`budgetCategories_${payload.householdId}`, get().budgetCategories);
+      await enqueue({
+        entity: 'budgetCategories',
+        action: 'create',
+        method: 'POST',
+        endpoint: '/budgets/categories',
+        payload: { ...payload, clientId },
+        localId: clientId,
+        clientId,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
+      return optimistic;
+    }
+    try {
+      const { data } = await api.post('/budgets/categories', payload);
+      set(s => {
+        const exists = s.budgetCategories.some(c => c.id === data.id);
+        return {
+          budgetCategories: exists
+            ? s.budgetCategories.map(c => c.id === data.id ? data : c)
+            : [...s.budgetCategories, data],
+        };
+      });
+      await saveCache(`budgetCategories_${payload.householdId}`, get().budgetCategories);
+      return data;
+    } catch (e) {
+      // Network blip after we thought we were online → fall back to offline path.
+      if (isNetworkError(e)) {
+        set({ isOnline: false });
+        return get().upsertBudgetCategory(payload);
+      }
+      throw e;
+    }
   },
 
   updateBudgetCategory: async (id, patch) => {
-    if (!get().isOnline) throw new OfflineActionError();
+    if (!get().isOnline) {
+      set(s => ({
+        budgetCategories: s.budgetCategories.map(c =>
+          c.id === id ? { ...c, ...patch, updatedAt: new Date().toISOString(), _offline: true } : c
+        ),
+      }));
+      const cat = get().budgetCategories.find(c => c.id === id);
+      if (cat?.householdId) await saveCache(`budgetCategories_${cat.householdId}`, get().budgetCategories);
+      await enqueue({
+        entity: 'budgetCategories',
+        action: 'update',
+        method: 'PUT',
+        endpoint: `/budgets/categories/${id}`,
+        payload: patch,
+        localId: id,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
+      return get().budgetCategories.find(c => c.id === id);
+    }
     const { data } = await api.put(`/budgets/categories/${id}`, patch);
     set(s => ({ budgetCategories: s.budgetCategories.map(c => c.id === id ? data : c) }));
     return data;
   },
 
   deleteBudgetCategory: async (id) => {
-    if (!get().isOnline) throw new OfflineActionError();
+    const cat = get().budgetCategories.find(c => c.id === id);
+    if (!get().isOnline) {
+      // If this was a never-synced local item, just drop it locally.
+      if (cat?._offline && String(id).startsWith('local-')) {
+        set(s => ({ budgetCategories: s.budgetCategories.filter(c => c.id !== id) }));
+        return;
+      }
+      set(s => ({ budgetCategories: s.budgetCategories.filter(c => c.id !== id) }));
+      if (cat?.householdId) await saveCache(`budgetCategories_${cat.householdId}`, get().budgetCategories);
+      await enqueue({
+        entity: 'budgetCategories',
+        action: 'delete',
+        method: 'DELETE',
+        endpoint: `/budgets/categories/${id}`,
+        payload: null,
+        localId: id,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
+      return;
+    }
     await api.delete(`/budgets/categories/${id}`);
     set(s => ({ budgetCategories: s.budgetCategories.filter(c => c.id !== id) }));
   },
@@ -2280,8 +2604,13 @@ const useStore = create((set, get) => ({
     }
   },
 
+  // Chat is intentionally online-only: a message that you "sent" but the
+  // other person never receives is worse than a clean failure. So we refuse
+  // outright when offline and surface a typed error the screen can handle.
   sendChatMessage: async (friendId, { text, kind, metadata } = {}) => {
     if (!friendId) throw new Error('friendId obligatoriu');
+    if (!get().isOnline) throw new OfflineActionError('Mesajele necesită conexiune la internet.');
+
     const clientId = createClientId('msg');
     const optimistic = {
       id: `local-${clientId}`,
@@ -2301,8 +2630,6 @@ const useStore = create((set, get) => ({
       },
     }));
 
-    if (!get().isOnline) return optimistic;
-
     try {
       const { data } = await api.post(`/chats/${friendId}/messages`, { clientId, text, kind, metadata });
       set(s => ({
@@ -2314,10 +2641,12 @@ const useStore = create((set, get) => ({
       await saveCache(`chat_${friendId}`, get().chatByFriend[friendId]);
       return data;
     } catch (e) {
+      // Real-time-fail the optimistic bubble (turn it red) so the user knows
+      // it didn't go out — chat must remain accurate.
       set(s => ({
         chatByFriend: {
           ...s.chatByFriend,
-          [friendId]: (s.chatByFriend[friendId] || []).map(m => m.id === optimistic.id ? { ...m, _failed: true } : m),
+          [friendId]: (s.chatByFriend[friendId] || []).filter(m => m.id !== optimistic.id),
         },
       }));
       throw e;
