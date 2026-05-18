@@ -8,6 +8,7 @@ import useStore from '../store';
 import {
   T, RADIUS, SHADOW, FONTS, daysUntil, formatDate, formatCurrency, display,
 } from '../theme';
+import AuditFooter from '../components/AuditFooter';
 
 const TABS = [
   { k: 'all',     l: 'Toate' },
@@ -241,6 +242,12 @@ export default function BillsScreen({ navigation }) {
                         <Text style={styles.billProvider} numberOfLines={1}>
                           {b.provider} · scadent {formatDate(b.dueDate)}
                         </Text>
+                        <AuditFooter
+                          creator={b.user}
+                          updater={b.updatedBy}
+                          createdAt={b.createdAt}
+                          updatedAt={b.updatedAt}
+                        />
                       </View>
                       <View style={{ alignItems: 'flex-end' }}>
                         <Text style={[styles.billAmount, display(700)]}>{formatCurrency(b.amount)}</Text>

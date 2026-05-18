@@ -13,22 +13,35 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import api from '../api/client';
+import useStore from '../store';
 import { T, RADIUS, FONTS, SHADOW } from '../theme';
 
-const WELCOME_MSG = {
-  id: 'welcome',
-  role: 'assistant',
-  content:
-    'Bună! Sunt Urbio AI, asistentul tău auto. Te pot ajuta cu informații despre ITP, RCA, CASCO, întreținere vehicule și legislație auto românească. Cu ce te pot ajuta?',
-  time: new Date(),
+const WELCOME_BY_MODE = {
+  vehicle: {
+    title: 'Asistent auto inteligent',
+    placeholder: 'Întreabă ceva despre vehiculul tău…',
+    content:
+      'Bună! Sunt Urbio AI, asistentul tău auto. Te pot ajuta cu informații despre ITP, RCA, CASCO, întreținere vehicule și legislație auto românească. Cu ce te pot ajuta?',
+    fallbackSuggestions: [
+      { label: '📅 Când scade RCA-ul?',           value: 'Când scade RCA-ul meu?' },
+      { label: '🔧 Service recomandat',           value: 'Recomandă-mi un service auto.' },
+      { label: '⛽ Consum carburant',              value: 'Cum îmi calculez consumul de carburant?' },
+      { label: '📋 Documente necesare ITP',       value: 'Ce documente sunt necesare pentru ITP?' },
+    ],
+  },
+  household: {
+    title: 'Asistent casă inteligent',
+    placeholder: 'Întreabă ceva despre cheltuielile, facturile sau bugetul tău…',
+    content:
+      'Bună! Sunt Urbio AI pentru locuință. Te ajut cu bugetul, facturile, cheltuielile lunare și venituri. Întreabă-mă orice — am datele tale la dispoziție.',
+    fallbackSuggestions: [
+      { label: '💸 Cât am cheltuit luna asta?',   value: 'Câți bani am cheltuit luna asta și pe ce categorii principale?' },
+      { label: '🚨 Ce facturi am restante?',      value: 'Ce facturi am restante și ce sumă datorez?' },
+      { label: '📊 Sunt peste buget?',            value: 'Care categorii sunt peste buget luna asta și cu cât?' },
+      { label: '⚖️ Care e balanța mea?',          value: 'Care e diferența dintre venituri și cheltuieli luna asta?' },
+    ],
+  },
 };
-
-const QUICK_SUGGESTIONS = [
-  { label: '📅 Când scade RCA-ul?', value: 'Când scade RCA-ul meu?' },
-  { label: '🔧 Service recomandat', value: 'Recomandă-mi un service auto' },
-  { label: '⛽ Consum carburant', value: 'Cum îmi calculez consumul de carburant?' },
-  { label: '📋 Documente necesare ITP', value: 'Ce documente sunt necesare pentru ITP?' },
-];
 
 function BouncingDots() {
   const dot1 = useRef(new Animated.Value(0)).current;
@@ -78,12 +91,44 @@ function formatTime(date) {
   return d.toLocaleTimeString('ro-RO', { hour: '2-digit', minute: '2-digit' });
 }
 
-export default function AIChatScreen({ navigation }) {
-  const [messages, setMessages] = useState([WELCOME_MSG]);
+export default function AIChatScreen({ navigation, route }) {
+  const appMode = useStore(s => s.appMode);
+  const selectedHouseholdId = useStore(s => s.selectedHouseholdId);
+
+  // Mode comes from explicit route param, else from current app mode.
+  const mode = route?.params?.mode || (appMode === 'household' ? 'household' : 'vehicle');
+  const householdId = route?.params?.householdId || (mode === 'household' ? selectedHouseholdId : null);
+  const cfg = WELCOME_BY_MODE[mode] || WELCOME_BY_MODE.vehicle;
+
+  const welcomeMsg = {
+    id: 'welcome',
+    role: 'assistant',
+    content: cfg.content,
+    time: new Date(),
+  };
+
+  const [messages, setMessages] = useState([welcomeMsg]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [suggestions, setSuggestions] = useState(cfg.fallbackSuggestions);
   const flatListRef = useRef(null);
   const userMessageSent = messages.some(m => m.role === 'user');
+
+  // Pull personalized suggestions on mount (server already knows the user's data)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await api.get('/ai/suggestions', {
+          params: { mode, ...(householdId ? { householdId } : {}) },
+        });
+        if (!cancelled && Array.isArray(data?.suggestions) && data.suggestions.length) {
+          setSuggestions(data.suggestions);
+        }
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [mode, householdId]);
 
   const sendMessage = async (overrideText) => {
     const text = (overrideText !== undefined ? overrideText : inputText).trim();
@@ -94,6 +139,8 @@ export default function AIChatScreen({ navigation }) {
     setIsLoading(true);
     try {
       const { data } = await api.post('/ai/chat', {
+        mode,
+        ...(householdId ? { householdId } : {}),
         messages: [...messages.filter(m => m.role !== 'system'), { role: 'user', content: text }].map(m => ({
           role: m.role,
           content: m.content,
@@ -152,7 +199,7 @@ export default function AIChatScreen({ navigation }) {
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle}>🤖 Urbio AI</Text>
-          <Text style={styles.headerSubtitle}>Asistent auto inteligent</Text>
+          <Text style={styles.headerSubtitle}>{cfg.title}</Text>
         </View>
         <View style={{ width: 40 }} />
       </View>
@@ -172,10 +219,10 @@ export default function AIChatScreen({ navigation }) {
           ListHeaderComponent={isLoading ? <BouncingDots /> : null}
         />
 
-        {!userMessageSent && (
+        {!userMessageSent && suggestions.length > 0 && (
           <View style={styles.suggestionsContainer}>
             <View style={styles.suggestionsGrid}>
-              {QUICK_SUGGESTIONS.map((s, i) => (
+              {suggestions.map((s, i) => (
                 <TouchableOpacity
                   key={i}
                   style={styles.suggestionPill}
@@ -193,7 +240,7 @@ export default function AIChatScreen({ navigation }) {
               style={styles.input}
               value={inputText}
               onChangeText={setInputText}
-              placeholder="Întreabă ceva despre vehiculul tău..."
+              placeholder={cfg.placeholder}
               placeholderTextColor={T.ink4}
               multiline
               maxHeight={80}

@@ -18,6 +18,7 @@ import {
   useResponsive, useSafeBottomPadding, HIT_SLOP, TOUCH_TARGET,
 } from '../theme';
 import { Card, Pill, EmptyState, LoadingView } from '../components/ui';
+import AuditFooter from '../components/AuditFooter';
 import { exportExpenses, pickExpensesFile } from '../utils/expenseIO';
 import { getCategoryMeta, getCategoriesFor } from '../utils/categories';
 import MonthPicker from '../components/MonthPicker';
@@ -235,7 +236,7 @@ export default function HouseholdExpensesScreen({ navigation }) {
   const renderItem = ({ item }) => {
     const meta = getCatMeta(item.category);
     const household = households.find(h => h.id === item.householdId);
-    const addedByMe = item.userId === user?.id;
+    const fromSync = item.source === 'invoice' || item.source === 'fuel';
     return (
       <TouchableOpacity
         style={styles.itemCard}
@@ -251,7 +252,14 @@ export default function HouseholdExpensesScreen({ navigation }) {
           <Text style={styles.itemIconText}>{meta.icon}</Text>
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={styles.itemTitle} numberOfLines={1}>{item.title}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text style={styles.itemTitle} numberOfLines={1}>{item.title}</Text>
+            {fromSync && (
+              <Text style={{ fontSize: 9, color: T.brand, fontWeight: '700' }}>
+                {item.source === 'fuel' ? '⛽ AUTO' : '🚗 AUTO'}
+              </Text>
+            )}
+          </View>
           <View style={styles.itemMetaRow}>
             <Text style={[styles.itemCat, { color: meta.color, backgroundColor: meta.bg }]}>
               {meta.label}
@@ -259,10 +267,13 @@ export default function HouseholdExpensesScreen({ navigation }) {
             {households.length > 1 && household && (
               <Text style={styles.itemHh}>{household.name}</Text>
             )}
-            {!addedByMe && (
-              <Text style={styles.itemAddedBy}>de membru</Text>
-            )}
           </View>
+          <AuditFooter
+            creator={item.user}
+            updater={item.updatedBy}
+            createdAt={item.createdAt}
+            updatedAt={item.updatedAt}
+          />
         </View>
         <View style={{ alignItems: 'flex-end' }}>
           <Text style={styles.itemAmount}>{formatCurrency(item.amount, item.currency || 'RON')}</Text>

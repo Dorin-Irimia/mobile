@@ -90,6 +90,13 @@ export default function AddFuelScreen({ navigation, route }) {
   const [attachments, setAttachments] = useState([]);
   const [loading, setLoading] = useState(false);
 
+  // Sincronizare cu casa
+  const households = useStore(s => s.households);
+  const selectedHouseholdId = useStore(s => s.selectedHouseholdId);
+  const defaultHouseholdId = selectedHouseholdId || households[0]?.id || null;
+  const [syncToHousehold, setSyncToHousehold] = useState(false);
+  const [syncHouseholdId, setSyncHouseholdId] = useState(defaultHouseholdId);
+
   const selectedVehicle = useMemo(
     () => ownedAndShared.find(v => v.id === vehicleId),
     [ownedAndShared, vehicleId],
@@ -155,6 +162,10 @@ export default function AddFuelScreen({ navigation, route }) {
       if (notes.trim()) fd.append('notes', notes.trim());
       if (Object.keys(customFields).length > 0) {
         fd.append('customFields', JSON.stringify(customFields));
+      }
+      if (syncToHousehold && syncHouseholdId) {
+        fd.append('syncToHouseholdId', syncHouseholdId);
+        fd.append('syncCategory', 'transport');
       }
       attachments.forEach((a, i) => {
         fd.append('attachments', {
@@ -382,6 +393,46 @@ export default function AddFuelScreen({ navigation, route }) {
             />
           </View>
 
+          {/* Sincronizare cu cheltuielile casnice */}
+          {households.length > 0 && (
+            <View style={styles.card}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>🏠 Adaugă și la cheltuielile casei</Text>
+                  <Text style={styles.helper}>
+                    Aceeași sumă apare automat ca o cheltuială casnică (categorie „transport"). Se sincronizează la editare/ștergere.
+                  </Text>
+                </View>
+                <Switch
+                  value={syncToHousehold}
+                  onValueChange={setSyncToHousehold}
+                  trackColor={{ false: T.line, true: T.brandTint2 }}
+                  thumbColor={syncToHousehold ? T.brand : '#fff'}
+                />
+              </View>
+              {syncToHousehold && households.length > 1 && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 12 }} contentContainerStyle={{ gap: 8 }}>
+                  {households.map(h => {
+                    const active = h.id === syncHouseholdId;
+                    return (
+                      <TouchableOpacity
+                        key={h.id}
+                        onPress={() => setSyncHouseholdId(h.id)}
+                        style={{
+                          paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999,
+                          backgroundColor: active ? T.brand : T.card,
+                          borderWidth: 1, borderColor: active ? T.brand : T.line,
+                        }}
+                      >
+                        <Text style={{ fontSize: 12, fontWeight: '600', color: active ? '#fff' : T.ink2 }}>{h.name}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              )}
+            </View>
+          )}
+
           {/* Note */}
           <View style={styles.card}>
             <Text style={styles.label}>Notițe</Text>
@@ -461,6 +512,7 @@ const styles = StyleSheet.create({
     marginTop: SPACING.sm,
   },
   hint: { fontSize: 11, color: T.ink4, marginTop: 4, marginBottom: SPACING.sm },
+  helper: { fontSize: 11, color: T.ink3, lineHeight: 16, marginTop: 4 },
   input: {
     borderWidth: 1.5,
     borderColor: T.line,

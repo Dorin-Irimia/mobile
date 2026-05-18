@@ -1,128 +1,82 @@
-// In-app PDF viewer powered by react-native-webview.
+// Native PDF rendering on both iOS and Android via react-native-pdf
+// (PDFKit on iOS, AndroidPdfViewer / PdfRenderer on Android). Falls back to
+// downloading + base64 only if a `file://` URI is provided and direct rendering
+// fails for some reason.
 //
-// • iOS: WebView renders PDFs natively (built-in pinch zoom, scroll).
-// • Android: WebView cannot render PDFs out of the box. For http(s) URLs we
-//   embed via Google's Docs viewer; for local file:// URLs we download to a
-//   cache file and base64-encode it into a PDF.js-free fallback page that
-//   uses native scroll + CSS zoom buttons. The zoom buttons are mirrored on
-//   both platforms so the UX is identical.
+// Reasons we switched away from WebView-based rendering:
+//   • Android Chromium WebView cannot render PDFs natively (black screen for
+//     <embed> + base64 and for data: URIs).
+//   • Google Docs viewer (`docs.google.com/gview?embedded`) cannot reach LAN
+//     URLs like http://192.168.x.x:3002, so it stays blank for self-hosted dev
+//     servers and any non-public backend.
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  Platform,
 } from 'react-native';
-import WebView from 'react-native-webview';
-import * as FileSystem from 'expo-file-system/legacy';
+import Pdf from 'react-native-pdf';
 import { T, RADIUS, FONTS, SPACING, HIT_SLOP, SHADOW } from '../theme';
 
-const ANDROID_REMOTE_VIEWER = (url) =>
-  `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(url)}`;
-
-// Inline HTML wrapper used for local PDFs on Android (and as a fallback when
-// Google's viewer is unreachable). It loads the PDF as a base64 <embed/>
-// inside a styled container so the user can pinch / pan / zoom.
-function buildLocalHtml(base64) {
-  return `<!doctype html><html><head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=8.0, user-scalable=yes" />
-    <style>
-      html, body { margin:0; padding:0; height:100%; background:#000; }
-      embed { width:100%; height:100%; border:0; }
-      object { width:100%; height:100%; border:0; }
-    </style>
-  </head><body>
-    <object data="data:application/pdf;base64,${base64}" type="application/pdf">
-      <embed src="data:application/pdf;base64,${base64}" type="application/pdf" />
-    </object>
-  </body></html>`;
-}
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 4;
+const ZOOM_STEP = 0.5;
 
 export default function PdfViewer({ uri, fileName }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [zoom, setZoom] = useState(1);
-  const [base64, setBase64] = useState(null);
-  const [loadingLocal, setLoadingLocal] = useState(false);
-  const webViewRef = useRef(null);
+  const [page, setPage] = useState(1);
+  const [pageCount, setPageCount] = useState(0);
 
-  const isLocal = typeof uri === 'string' && uri.startsWith('file:');
-  const isAndroid = Platform.OS === 'android';
-  const needsLocalEncode = isLocal && isAndroid;
+  const source = { uri, cache: true };
 
-  useEffect(() => {
-    let cancelled = false;
-    if (!needsLocalEncode) return;
-    setLoadingLocal(true);
-    FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 })
-      .then(b64 => { if (!cancelled) setBase64(b64); })
-      .catch(() => { if (!cancelled) setBase64(null); })
-      .finally(() => { if (!cancelled) setLoadingLocal(false); });
-    return () => { cancelled = true; };
-  }, [uri, needsLocalEncode]);
-
-  const source = useMemo(() => {
-    if (!isAndroid) return { uri };
-    if (isLocal) return base64 ? { html: buildLocalHtml(base64) } : null;
-    return { uri: ANDROID_REMOTE_VIEWER(uri) };
-  }, [uri, isAndroid, isLocal, base64]);
-
-  const setBodyZoom = (next) => {
-    setZoom(next);
-    // The native PDF view on iOS does not respond to CSS zoom — but the user
-    // can pinch directly inside the WebView, so we just toggle CSS for the
-    // HTML-rendered Android case.
-    const js = `(function(){
-      try {
-        document.body.style.zoom = '${next}';
-        document.documentElement.style.transformOrigin = '0 0';
-      } catch (e) {}
-      true;
-    })();`;
-    webViewRef.current?.injectJavaScript?.(js);
-  };
-
-  if (needsLocalEncode && loadingLocal) {
+  if (error) {
     return (
       <View style={styles.loadingWrap}>
-        <ActivityIndicator color="#fff" />
-        <Text style={styles.loadingText}>Se pregătește PDF-ul…</Text>
-      </View>
-    );
-  }
-
-  if (!source) {
-    return (
-      <View style={styles.loadingWrap}>
-        <Text style={styles.errorText}>Nu am putut deschide PDF-ul.</Text>
+        <Text style={styles.errorIcon}>⚠️</Text>
+        <Text style={styles.errorTitle}>Nu pot deschide PDF-ul</Text>
+        <Text style={styles.errorText}>{error}</Text>
+        {fileName ? <Text style={styles.errorFile}>{fileName}</Text> : null}
       </View>
     );
   }
 
   return (
     <View style={styles.root}>
-      <WebView
-        ref={webViewRef}
+      <Pdf
         source={source}
-        style={styles.web}
-        originWhitelist={['*']}
-        allowsBackForwardNavigationGestures={false}
-        scalesPageToFit
-        androidLayerType="hardware"
-        startInLoadingState
-        renderLoading={() => (
-          <View style={styles.loadingOverlay}>
-            <ActivityIndicator color="#fff" />
-          </View>
-        )}
+        trustAllCerts={false}
+        onLoadComplete={(n) => { setPageCount(n); setLoading(false); }}
+        onPageChanged={(p) => setPage(p)}
+        onError={(err) => {
+          const msg = err?.message || String(err) || 'Eroare necunoscută';
+          setError(msg);
+          setLoading(false);
+        }}
+        scale={zoom}
+        minScale={MIN_ZOOM}
+        maxScale={MAX_ZOOM}
+        enablePaging={false}
+        enableAntialiasing
+        spacing={6}
+        style={styles.pdf}
       />
+
+      {loading && (
+        <View style={styles.loadingOverlay} pointerEvents="none">
+          <ActivityIndicator color="#fff" />
+          <Text style={styles.loadingText}>Se încarcă PDF-ul…</Text>
+        </View>
+      )}
 
       <View style={styles.zoomBar} pointerEvents="box-none">
         <TouchableOpacity
           style={styles.zoomBtn}
-          onPress={() => setBodyZoom(Math.max(0.5, +(zoom - 0.25).toFixed(2)))}
+          onPress={() => setZoom(z => Math.max(MIN_ZOOM, +(z - ZOOM_STEP).toFixed(2)))}
           hitSlop={HIT_SLOP}
         >
           <Text style={styles.zoomBtnText}>−</Text>
@@ -132,33 +86,42 @@ export default function PdfViewer({ uri, fileName }) {
         </View>
         <TouchableOpacity
           style={styles.zoomBtn}
-          onPress={() => setBodyZoom(Math.min(4, +(zoom + 0.25).toFixed(2)))}
+          onPress={() => setZoom(z => Math.min(MAX_ZOOM, +(z + ZOOM_STEP).toFixed(2)))}
           hitSlop={HIT_SLOP}
         >
           <Text style={styles.zoomBtnText}>+</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.zoomBtn, styles.zoomReset]}
-          onPress={() => setBodyZoom(1)}
+          onPress={() => setZoom(1)}
           hitSlop={HIT_SLOP}
         >
           <Text style={styles.zoomBtnText}>↺</Text>
         </TouchableOpacity>
       </View>
+
+      {pageCount > 1 && (
+        <View style={styles.pageBar} pointerEvents="none">
+          <Text style={styles.pageText}>{page} / {pageCount}</Text>
+        </View>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#000' },
-  web: { flex: 1, backgroundColor: '#000' },
-  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#000', gap: 12 },
-  loadingText: { color: '#fff', fontSize: 13 },
-  errorText: { color: '#fff', fontSize: 13 },
+  pdf: { flex: 1, width: '100%', backgroundColor: '#000' },
+  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#000', gap: 12, padding: 24 },
+  loadingText: { color: '#fff', fontSize: 13, marginTop: 8 },
+  errorIcon: { fontSize: 48 },
+  errorTitle: { color: '#fff', fontSize: 16, fontWeight: FONTS.bold },
+  errorText: { color: 'rgba(255,255,255,0.75)', fontSize: 12, textAlign: 'center' },
+  errorFile: { color: 'rgba(255,255,255,0.45)', fontSize: 11, marginTop: 4 },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center', justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.7)',
+    backgroundColor: 'rgba(0,0,0,0.55)',
   },
   zoomBar: {
     position: 'absolute',
@@ -185,4 +148,13 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.10)',
   },
   zoomLabelText: { color: '#fff', fontSize: 11, fontWeight: FONTS.bold },
+  pageBar: {
+    position: 'absolute',
+    top: SPACING.lg,
+    alignSelf: 'center',
+    paddingHorizontal: 12, paddingVertical: 5,
+    borderRadius: RADIUS.full,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+  },
+  pageText: { color: '#fff', fontSize: 12, fontWeight: FONTS.semibold },
 });

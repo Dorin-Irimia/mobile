@@ -8,6 +8,7 @@ import useStore from '../store';
 import {
   T, RADIUS, SHADOW, FONTS, daysUntil, formatDate, formatCurrency, display,
 } from '../theme';
+import AuditFooter from '../components/AuditFooter';
 
 export const SERVICE_TYPES = {
   'service-general': { icon: '🔧', color: '#3B82F6', label: 'Service general' },
@@ -226,6 +227,12 @@ export default function ServiceHistoryScreen({ navigation, route }) {
                         <Text style={styles.notesText}>{s.notes}</Text>
                       </View>
                     )}
+                    <AuditFooter
+                      creator={s.user}
+                      updater={s.updatedBy}
+                      createdAt={s.createdAt}
+                      updatedAt={s.updatedAt}
+                    />
                   </View>
                 </TouchableOpacity>
               );

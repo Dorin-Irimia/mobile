@@ -47,16 +47,42 @@ export default function AddHouseholdExpenseScreen({ navigation, route }) {
   const selectedHouseholdId = useStore(s => s.selectedHouseholdId);
   const customCategories = useStore(s => s.customCategories);
   const loadCustomCategories = useStore(s => s.loadCustomCategories);
+  const budgetCategories = useStore(s => s.budgetCategories);
+  const fetchBudgetCategories = useStore(s => s.fetchBudgetCategories);
   const { isTablet, hPad, maxContentWidth } = useResponsive();
 
   useEffect(() => { loadCustomCategories(); }, []);
-  const CATEGORIES = useMemo(
-    () => getCategoriesFor('expense', customCategories).map(c => ({
+
+  // Re-fetch budget categories for the currently-selected household so we can
+  // expose them in the picker. Falls back to defaults if user hasn't defined any.
+  const initialHouseholdIdLocal =
+    route?.params?.householdId || selectedHouseholdId || households[0]?.id || null;
+  useEffect(() => {
+    if (initialHouseholdIdLocal) fetchBudgetCategories(initialHouseholdIdLocal);
+  }, [initialHouseholdIdLocal, fetchBudgetCategories]);
+
+  const CATEGORIES = useMemo(() => {
+    const defaults = getCategoriesFor('expense', customCategories).map(c => ({
       ...c,
       label: `${c.icon} ${c.label} `,
-    })),
-    [customCategories],
-  );
+      isBudget: false,
+    }));
+    const fromBudget = (budgetCategories || [])
+      .filter(b => b.householdId === initialHouseholdIdLocal)
+      .map(b => ({
+        key: b.key,
+        label: `${b.icon || '📦'} ${b.label} `,
+        color: b.color || T.brand,
+        icon: b.icon || '📦',
+        isBudget: true,
+        monthlyLimit: b.monthlyLimit,
+      }));
+    // Merge: budget categories first, then defaults that don't overlap by key.
+    const seen = new Set(fromBudget.map(c => c.key));
+    const merged = [...fromBudget];
+    defaults.forEach(d => { if (!seen.has(d.key)) merged.push(d); });
+    return merged;
+  }, [customCategories, budgetCategories, initialHouseholdIdLocal]);
 
   const expenseId = route?.params?.expenseId;
   const isEdit = !!expenseId;
@@ -177,7 +203,14 @@ export default function AddHouseholdExpenseScreen({ navigation, route }) {
 
           {/* Categorie */}
           <View style={styles.card}>
-            <Text style={styles.label}>Categorie</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Text style={styles.label}>Categorie</Text>
+              {CATEGORIES.some(c => c.isBudget) && (
+                <Text style={{ fontSize: 11, color: T.brand, fontWeight: '600' }}>
+                  ⭐ = în buget
+                </Text>
+              )}
+            </View>
             <View style={styles.catGrid}>
               {CATEGORIES.map(c => {
                 const active = category === c.key;
@@ -188,17 +221,26 @@ export default function AddHouseholdExpenseScreen({ navigation, route }) {
                     style={[
                       styles.catTile,
                       { backgroundColor: active ? c.color : T.bgSoft, borderColor: active ? c.color : T.line },
+                      c.isBudget && !active && { borderColor: c.color, borderWidth: 1.5 },
                     ]}
                   >
-                    <Text style={[styles.catText, { color: active ? '#fff' : T.ink2 }]}>{c.label}</Text>
+                    <Text style={[styles.catText, { color: active ? '#fff' : T.ink2 }]}>
+                      {c.isBudget ? '⭐ ' : ''}{c.label}
+                    </Text>
                   </TouchableOpacity>
                 );
               })}
               <TouchableOpacity
+                onPress={() => navigation.navigate('EditBudgetCategory', { householdId })}
+                style={[styles.catTile, { backgroundColor: T.card, borderColor: T.brand, borderStyle: 'dashed' }]}
+              >
+                <Text style={[styles.catText, { color: T.brand }]}>+ Buget nou</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
                 onPress={() => navigation.navigate('CustomCategories')}
                 style={[styles.catTile, { backgroundColor: T.card, borderColor: T.line, borderStyle: 'dashed' }]}
               >
-                <Text style={[styles.catText, { color: T.brand }]}>+ Categorie nouă</Text>
+                <Text style={[styles.catText, { color: T.ink3 }]}>+ Categorie</Text>
               </TouchableOpacity>
             </View>
           </View>

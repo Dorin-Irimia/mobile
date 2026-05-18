@@ -2160,6 +2160,22 @@ const useStore = create((set, get) => ({
     await saveCache('householdBills', get().householdBills);
   },
 
+  // ── Stats: cheltuieli per membru (pentru comparații) ──────────────────────
+  expensesByUser: null,  // { month, totalSpent, users: [{ user, total, count, share, byCategory }] }
+
+  fetchExpensesByUser: async (householdId, month) => {
+    if (!householdId || !get().isOnline) return null;
+    try {
+      const { data } = await api.get('/household-expenses/stats/by-user', {
+        params: { householdId, ...(month ? { month } : {}) },
+      });
+      set({ expensesByUser: data });
+      return data;
+    } catch {
+      return null;
+    }
+  },
+
   // ── Budget ─────────────────────────────────────────────────────────────────
   budgetCategories: [],
   budgetSummary: null,

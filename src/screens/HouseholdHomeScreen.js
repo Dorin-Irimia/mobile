@@ -91,6 +91,8 @@ export default function HouseholdHomeScreen({ navigation }) {
   const householdEvents = useStore(s => s.householdEvents);
   const fetchHouseholdExpenses = useStore(s => s.fetchHouseholdExpenses);
   const fetchHouseholdIncomes = useStore(s => s.fetchHouseholdIncomes);
+  const expensesByUser = useStore(s => s.expensesByUser);
+  const fetchExpensesByUser = useStore(s => s.fetchExpensesByUser);
   const fetchHouseholdEvents = useStore(s => s.fetchHouseholdEvents);
   const notifications = useStore(s => s.notifications);
   const fetchNotifications = useStore(s => s.fetchNotifications);
@@ -128,7 +130,10 @@ export default function HouseholdHomeScreen({ navigation }) {
       loadCustomCategories(),
       loadMonthStartDay(),
     ]);
-  }, [fetchHouseholds, fetchHouseholdExpenses, fetchHouseholdIncomes, fetchHouseholdEvents, fetchNotifications, loadCustomCategories, loadMonthStartDay]);
+    // Per-user breakdown is best loaded once we know which household is current.
+    const hhId = useStore.getState().selectedHouseholdId || useStore.getState().households[0]?.id;
+    if (hhId) fetchExpensesByUser(hhId).catch(() => {});
+  }, [fetchHouseholds, fetchHouseholdExpenses, fetchHouseholdIncomes, fetchHouseholdEvents, fetchNotifications, loadCustomCategories, loadMonthStartDay, fetchExpensesByUser]);
 
   useEffect(() => {
     (async () => { setLoading(true); await loadAll(); setLoading(false); })();
@@ -392,7 +397,7 @@ export default function HouseholdHomeScreen({ navigation }) {
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.actionTile, !isOnline && styles.actionTileDisabled]}
-            onPress={goOnline('AIChat', undefined, 'Asistentul AI')}
+            onPress={goOnline('AIChat', { mode: 'household', householdId: selectedHouseholdId }, 'Asistentul AI')}
             activeOpacity={0.85}
           >
             <Text style={styles.actionIcon}>🤖</Text>
@@ -464,6 +469,49 @@ export default function HouseholdHomeScreen({ navigation }) {
                 emptyHint={`Fără venituri pentru ${periodLabel}.`}
                 getMeta={(key) => getCategoryMeta(key, 'income', customCategories)}
               />
+            )}
+
+            {/* Per-user breakdown (comparație între membri) */}
+            {expensesByUser && expensesByUser.users && expensesByUser.users.length >= 2 && (
+              <View style={styles.userBreakdownCard}>
+                <Text style={styles.userBreakdownTitle}>👥 Cine cât a cheltuit · luna asta</Text>
+                <Text style={styles.userBreakdownSub}>
+                  Total: {formatCurrency(expensesByUser.totalSpent || 0, 'RON')}
+                </Text>
+                <View style={{ marginTop: SPACING.md, gap: SPACING.sm }}>
+                  {expensesByUser.users.map((u, i) => {
+                    const initials = (u.user?.name || '?')
+                      .split(' ').slice(0, 2).map(w => w[0] || '').join('').toUpperCase();
+                    const isLeader = i === 0;
+                    return (
+                      <View key={u.user?.id || i} style={styles.userBreakdownRow}>
+                        <View style={[styles.userBreakdownAvatar, isLeader && { backgroundColor: T.brand }]}>
+                          <Text style={styles.userBreakdownAvatarText}>{initials}</Text>
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                            <Text style={styles.userBreakdownName} numberOfLines={1}>
+                              {u.user?.name || u.user?.email || 'Necunoscut'}
+                            </Text>
+                            <Text style={styles.userBreakdownAmount}>
+                              {formatCurrency(u.total, 'RON')}
+                            </Text>
+                          </View>
+                          <View style={styles.userBreakdownBarTrack}>
+                            <View style={[
+                              styles.userBreakdownBarFill,
+                              { width: `${Math.min(100, u.share)}%`, backgroundColor: isLeader ? T.brand : T.brandTint2 },
+                            ]} />
+                          </View>
+                          <Text style={styles.userBreakdownMeta}>
+                            {u.share.toFixed(1)}% din total · {u.count} înregistrări
+                          </Text>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              </View>
             )}
           </View>
         )}
@@ -641,6 +689,26 @@ const styles = StyleSheet.create({
     fontSize: 14, fontWeight: FONTS.bold, color: T.ink,
     marginBottom: SPACING.sm, letterSpacing: 0.3,
   },
+
+  userBreakdownCard: {
+    backgroundColor: T.card, borderRadius: RADIUS.lg, padding: SPACING.lg,
+    ...SHADOW.sm,
+  },
+  userBreakdownTitle: { fontSize: 14, fontWeight: FONTS.bold, color: T.ink },
+  userBreakdownSub:   { fontSize: 11, color: T.ink3, marginTop: 2 },
+  userBreakdownRow:   { flexDirection: 'row', alignItems: 'center', gap: SPACING.md },
+  userBreakdownAvatar: {
+    width: 32, height: 32, borderRadius: 16,
+    backgroundColor: T.brandTint, alignItems: 'center', justifyContent: 'center',
+  },
+  userBreakdownAvatarText: { color: T.brand, fontSize: 11, fontWeight: FONTS.bold },
+  userBreakdownName:   { fontSize: 13, color: T.ink, fontWeight: FONTS.semibold, flex: 1, marginRight: 8 },
+  userBreakdownAmount: { fontSize: 13, color: T.ink, fontWeight: FONTS.bold, fontVariant: ['tabular-nums'] },
+  userBreakdownBarTrack: {
+    height: 6, backgroundColor: T.line2, borderRadius: 3, marginTop: 4, overflow: 'hidden',
+  },
+  userBreakdownBarFill: { height: '100%', borderRadius: 3 },
+  userBreakdownMeta:   { fontSize: 10, color: T.ink3, marginTop: 2 },
 
   evCard: {
     flexDirection: 'row', alignItems: 'center', gap: SPACING.md,
