@@ -241,7 +241,8 @@ export default function BudgetTrackerScreen({ navigation }) {
                   <TouchableOpacity
                     key={c.id}
                     activeOpacity={0.7}
-                    onPress={() => navigation.navigate('EditBudgetCategory', { householdId, categoryId: c.id })}
+                    onPress={() => navigation.navigate('BudgetCategoryDetail', { categoryId: c.id, householdId })}
+                    onLongPress={() => navigation.navigate('EditBudgetCategory', { householdId, categoryId: c.id })}
                     style={[
                       styles.catRow,
                       i < categories.length - 1 && styles.catRowBorder,

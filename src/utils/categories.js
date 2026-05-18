@@ -76,6 +76,62 @@ export function getCategoryMeta(key, type, customCategories = []) {
   return all.find(c => c.key === key) || all[all.length - 1];
 }
 
+// Resolve a category key against (in order):
+//   1. household budget categories (shared)
+//   2. local custom categories
+//   3. built-in defaults
+// Returns a meta object { key, label, icon, color, bg }.
+export function resolveCategoryMeta(key, { type = 'expense', budgetCategories = [], customCategories = [] } = {}) {
+  if (!key) {
+    const defaults = type === 'income' ? DEFAULT_INCOME_CATEGORIES : DEFAULT_EXPENSE_CATEGORIES;
+    return defaults[defaults.length - 1];
+  }
+  const fromBudget = (budgetCategories || []).find(b => b.key === key);
+  if (fromBudget) {
+    const color = fromBudget.color || '#6B7280';
+    return {
+      key: fromBudget.key,
+      label: fromBudget.label,
+      icon: fromBudget.icon || '📌',
+      color,
+      bg: withBg(color),
+      fromBudget: true,
+      monthlyLimit: fromBudget.monthlyLimit,
+    };
+  }
+  return getCategoryMeta(key, type, customCategories);
+}
+
+// Merge budget categories + built-in defaults into one orderable list.
+// Budget categories come first; defaults that already exist as budgets are
+// skipped (matched by key).
+export function mergedCategoriesForPicker({ budgetCategories = [], type = 'expense', customCategories = [] } = {}) {
+  const defaults = type === 'income' ? DEFAULT_INCOME_CATEGORIES : DEFAULT_EXPENSE_CATEGORIES;
+  const customs  = (customCategories || [])
+    .filter(c => (c.type || 'expense') === type)
+    .map(normalizeCustomCategory)
+    .filter(Boolean);
+
+  const budgetItems = (budgetCategories || []).map(b => ({
+    key: b.key,
+    label: b.label,
+    icon: b.icon || '📌',
+    color: b.color || '#6B7280',
+    bg: withBg(b.color || '#6B7280'),
+    fromBudget: true,
+    budgetId: b.id,
+    monthlyLimit: b.monthlyLimit || 0,
+  }));
+  const seen = new Set(budgetItems.map(c => c.key));
+
+  const templates = defaults.map(d => ({ ...d, isTemplate: true }))
+    .filter(d => !seen.has(d.key));
+
+  const customsFiltered = customs.filter(c => !seen.has(c.key));
+
+  return [...budgetItems, ...templates, ...customsFiltered];
+}
+
 export function newCustomCategoryKey() {
   return `custom-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }

@@ -113,10 +113,12 @@ export default function AuthScreen() {
 
   const screenWidth = Dimensions.get('window').width;
   const cardMax = isTablet ? 480 : screenWidth;
-  const INNER_WIDTH = Math.min(cardMax, screenWidth) - hPad * 2 - 56;
+  // Card has horizontal padding of 24 on each side (48 total) and the tab bar
+  // has its own 4px padding (8 total). The pill indicator is half the inner width.
+  const INNER_WIDTH = Math.min(cardMax, screenWidth) - hPad * 2 - 48;
   const tabIndicatorTranslate = tabAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: [5, INNER_WIDTH / 2 + 5],
+    outputRange: [4, INNER_WIDTH / 2 + 4],
   });
 
   const fieldStyle = (field) => [
@@ -130,8 +132,6 @@ export default function AuthScreen() {
 
   return (
     <View style={styles.root}>
-      <View style={styles.bgGlowPrimary} />
-      <View style={styles.bgGlowSecondary} />
       <SafeAreaView style={styles.safe}>
         <KeyboardAvoidingView
           style={styles.flex}
@@ -148,10 +148,10 @@ export default function AuthScreen() {
             showsVerticalScrollIndicator={false}
           >
             <View style={styles.hero}>
-              <View style={styles.logoWrap}>
-                <Image source={TALON_MARK} style={styles.logoImage} resizeMode="contain" />
-              </View>
-              <Text style={styles.appTitle}>talon.</Text>
+              <Image source={TALON_MARK} style={styles.logoImage} resizeMode="contain" />
+              <Text style={styles.appTitle}>
+                talon<Text style={styles.appTitleDot}>.</Text>
+              </Text>
               <Text style={styles.appSub}>Mașini și locuințe într-un singur loc</Text>
             </View>
 
@@ -305,25 +305,7 @@ export default function AuthScreen() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#F7F4EF',
-  },
-  bgGlowPrimary: {
-    position: 'absolute',
-    top: -140,
-    right: -90,
-    width: 280,
-    height: 280,
-    borderRadius: 140,
-    backgroundColor: 'rgba(255, 107, 26, 0.14)',
-  },
-  bgGlowSecondary: {
-    position: 'absolute',
-    top: 120,
-    left: -70,
-    width: 180,
-    height: 180,
-    borderRadius: 90,
-    backgroundColor: 'rgba(255, 184, 141, 0.18)',
+    backgroundColor: '#F6F5F2',
   },
   safe: {
     flex: 1,
@@ -334,71 +316,69 @@ const styles = StyleSheet.create({
   scroll: {
     flexGrow: 1,
     alignItems: 'center',
-    paddingTop: 28,
+    paddingTop: 60,
     paddingBottom: 40,
   },
   hero: {
     alignItems: 'center',
-    marginBottom: 24,
-  },
-  logoWrap: {
-    width: 108,
-    height: 108,
-    borderRadius: 32,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.88)',
-    marginBottom: 18,
-    ...SHADOW.md,
-    shadowOpacity: 0.08,
-    shadowRadius: 18,
+    marginBottom: 40,
+    marginTop: 24,
   },
   logoImage: {
-    width: 88,
-    height: 88,
+    width: 110,
+    height: 96,
+    marginBottom: 32,
   },
   appTitle: {
-    fontSize: 48,
+    fontSize: 64,
     color: '#0E1116',
-    marginBottom: 8,
-    ...display(700, { letterSpacing: -1.4 }),
+    marginBottom: 12,
+    ...display(700, { letterSpacing: -2.4 }),
+    lineHeight: 64,
+  },
+  appTitleDot: {
+    color: T.brand,
   },
   appSub: {
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: FONTS.regular,
-    color: '#6E7582',
+    color: '#6A6F78',
     textAlign: 'center',
-    maxWidth: 320,
-    lineHeight: 24,
+    lineHeight: 22,
   },
   card: {
     width: '100%',
     backgroundColor: '#FFFFFF',
-    borderRadius: 34,
-    padding: 28,
+    borderRadius: 28,
+    padding: 24,
     ...SHADOW.md,
-    shadowOpacity: 0.12,
+    shadowOpacity: 0.10,
     shadowRadius: 24,
     elevation: 12,
   },
   tabBar: {
     flexDirection: 'row',
-    backgroundColor: '#ECEEF2',
-    borderRadius: 22,
+    backgroundColor: '#EFEEEA',
+    borderRadius: 999,
     marginBottom: 24,
-    height: 56,
+    height: 52,
     position: 'relative',
     overflow: 'hidden',
-    padding: 5,
+    padding: 4,
   },
   tabIndicator: {
     position: 'absolute',
-    top: 5,
+    top: 4,
     left: 0,
     width: '50%',
-    height: 46,
+    height: 44,
     backgroundColor: T.brand,
-    borderRadius: 18,
+    borderRadius: 999,
+    shadowColor: T.brand,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 4,
   },
   tabBtn: {
     flex: 1,
@@ -407,13 +387,14 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   tabLabel: {
-    fontSize: 16,
-    fontWeight: FONTS.medium,
-    color: '#6E7582',
+    fontSize: 15,
+    fontWeight: FONTS.semibold,
+    color: '#6A6F78',
+    letterSpacing: 0.1,
   },
   tabLabelActive: {
     color: '#fff',
-    fontWeight: FONTS.semibold,
+    fontWeight: FONTS.bold,
   },
   form: {
     gap: 4,

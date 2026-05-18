@@ -23,7 +23,7 @@ import LocationField from '../components/LocationField';
 import DateField from '../components/DateField';
 import TimeField from '../components/TimeField';
 import SuggestInput from '../components/SuggestInput';
-import { getCategoriesFor } from '../utils/categories';
+import { mergedCategoriesForPicker } from '../utils/categories';
 
 const SPLIT_OPTIONS = [
   { key: 'single', label: 'Doar eu', icon: '👤', desc: 'Plată făcută doar de tine' },
@@ -61,28 +61,22 @@ export default function AddHouseholdExpenseScreen({ navigation, route }) {
     if (initialHouseholdIdLocal) fetchBudgetCategories(initialHouseholdIdLocal);
   }, [initialHouseholdIdLocal, fetchBudgetCategories]);
 
-  const CATEGORIES = useMemo(() => {
-    const defaults = getCategoriesFor('expense', customCategories).map(c => ({
-      ...c,
-      label: `${c.icon} ${c.label} `,
-      isBudget: false,
-    }));
-    const fromBudget = (budgetCategories || [])
-      .filter(b => b.householdId === initialHouseholdIdLocal)
-      .map(b => ({
-        key: b.key,
-        label: `${b.icon || '📦'} ${b.label} `,
-        color: b.color || T.brand,
-        icon: b.icon || '📦',
-        isBudget: true,
-        monthlyLimit: b.monthlyLimit,
-      }));
-    // Merge: budget categories first, then defaults that don't overlap by key.
-    const seen = new Set(fromBudget.map(c => c.key));
-    const merged = [...fromBudget];
-    defaults.forEach(d => { if (!seen.has(d.key)) merged.push(d); });
-    return merged;
-  }, [customCategories, budgetCategories, initialHouseholdIdLocal]);
+  // Categories displayed in the picker. Budget categories defined at household
+  // level come first (shared across all members). Built-in defaults follow as
+  // quick templates — picking one auto-creates a matching BudgetCategory so it
+  // becomes visible to other members too.
+  const householdBudgetCategories = useMemo(
+    () => (budgetCategories || []).filter(b => b.householdId === initialHouseholdIdLocal),
+    [budgetCategories, initialHouseholdIdLocal]
+  );
+  const CATEGORIES = useMemo(
+    () => mergedCategoriesForPicker({
+      budgetCategories: householdBudgetCategories,
+      customCategories,
+      type: 'expense',
+    }).map(c => ({ ...c, displayLabel: `${c.icon} ${c.label}` })),
+    [householdBudgetCategories, customCategories]
+  );
 
   const expenseId = route?.params?.expenseId;
   const isEdit = !!expenseId;
@@ -113,12 +107,33 @@ export default function AddHouseholdExpenseScreen({ navigation, route }) {
   const selectedCat = CATEGORIES.find(c => c.key === category) || CATEGORIES[0];
   const selectedHousehold = households.find(h => h.id === householdId);
 
+  const upsertBudgetCategory = useStore(s => s.upsertBudgetCategory);
+
   const handleSave = async () => {
     if (!householdId) return Alert.alert('Locuință', 'Alege o locuință.');
     if (!title.trim()) return Alert.alert('Titlu', 'Adaugă un titlu.');
     if (!amount || isNaN(parseFloat(amount))) return Alert.alert('Sumă', 'Introdu sumă validă.');
     setLoading(true);
     try {
+      // If the chosen category is a built-in template not yet saved as a
+      // BudgetCategory for this household, persist it now so other members
+      // see it too and a (zero) budget exists from the start.
+      const meta = CATEGORIES.find(c => c.key === category);
+      if (meta && meta.isTemplate && !meta.fromBudget) {
+        try {
+          await upsertBudgetCategory({
+            householdId,
+            key: meta.key,
+            label: meta.label,
+            icon: meta.icon,
+            color: meta.color,
+            monthlyLimit: 0,
+          });
+        } catch (catErr) {
+          console.warn('Auto-create budget category failed:', catErr?.message);
+        }
+      }
+
       const fd = new FormData();
       fd.append('householdId', householdId);
       fd.append('title', title.trim());
@@ -205,11 +220,11 @@ export default function AddHouseholdExpenseScreen({ navigation, route }) {
           <View style={styles.card}>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               <Text style={styles.label}>Categorie</Text>
-              {CATEGORIES.some(c => c.isBudget) && (
-                <Text style={{ fontSize: 11, color: T.brand, fontWeight: '600' }}>
-                  ⭐ = în buget
-                </Text>
-              )}
+              <Text style={{ fontSize: 11, color: T.ink3, fontWeight: '500' }}>
+                {householdBudgetCategories.length > 0
+                  ? `${householdBudgetCategories.length} în buget · ⭐ partajat`
+                  : 'Alege una — se va adăuga automat la buget'}
+              </Text>
             </View>
             <View style={styles.catGrid}>
               {CATEGORIES.map(c => {
@@ -221,11 +236,11 @@ export default function AddHouseholdExpenseScreen({ navigation, route }) {
                     style={[
                       styles.catTile,
                       { backgroundColor: active ? c.color : T.bgSoft, borderColor: active ? c.color : T.line },
-                      c.isBudget && !active && { borderColor: c.color, borderWidth: 1.5 },
+                      c.fromBudget && !active && { borderColor: c.color, borderWidth: 1.5 },
                     ]}
                   >
                     <Text style={[styles.catText, { color: active ? '#fff' : T.ink2 }]}>
-                      {c.isBudget ? '⭐ ' : ''}{c.label}
+                      {c.fromBudget ? '⭐ ' : ''}{c.icon} {c.label}
                     </Text>
                   </TouchableOpacity>
                 );

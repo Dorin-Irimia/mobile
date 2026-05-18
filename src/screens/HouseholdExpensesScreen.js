@@ -20,7 +20,7 @@ import {
 import { Card, Pill, EmptyState, LoadingView } from '../components/ui';
 import AuditFooter from '../components/AuditFooter';
 import { exportExpenses, pickExpensesFile } from '../utils/expenseIO';
-import { getCategoryMeta, getCategoriesFor } from '../utils/categories';
+import { getCategoriesFor, resolveCategoryMeta } from '../utils/categories';
 import MonthPicker from '../components/MonthPicker';
 import { CategoryBreakdown } from '../components/Charts';
 import {
@@ -65,6 +65,8 @@ export default function HouseholdExpensesScreen({ navigation }) {
   const importHouseholdExpenses = useStore(s => s.importHouseholdExpenses);
   const customCategories = useStore(s => s.customCategories);
   const loadCustomCategories = useStore(s => s.loadCustomCategories);
+  const budgetCategories = useStore(s => s.budgetCategories);
+  const fetchBudgetCategories = useStore(s => s.fetchBudgetCategories);
   const monthStartDay = useStore(s => s.monthStartDay);
   const loadMonthStartDay = useStore(s => s.loadMonthStartDay);
   const user = useStore(s => s.user);
@@ -72,20 +74,41 @@ export default function HouseholdExpensesScreen({ navigation }) {
   const [monthAnchor, setMonthAnchor] = useState(() => startOfBillingMonth(new Date(), monthStartDay));
   const [scope, setScope] = useState('month'); // 'month' | 'all'
 
-  useEffect(() => { loadCustomCategories(); loadMonthStartDay(); }, []);
+  useEffect(() => {
+    loadCustomCategories();
+    loadMonthStartDay();
+    // Pull budget categories for the current scope (one household or all
+    // accessible ones) so the picker & badges resolve correctly.
+    fetchBudgetCategories(selectedHouseholdId || undefined);
+  }, [selectedHouseholdId]);
 
-  const filterCategories = useMemo(
-    () => [
-      { key: 'toate', label: 'Toate ' },
-      ...getCategoriesFor('expense', customCategories).map(c => ({
+  // Filters: budget categories first (shared), then any extra defaults that
+  // appear in expenses but don't yet have a budget; "Toate" pinned at the top.
+  const filterCategories = useMemo(() => {
+    const fromBudget = (budgetCategories || [])
+      .filter(b => !selectedHouseholdId || b.householdId === selectedHouseholdId)
+      .map(b => ({
+        key: b.key,
+        label: `${b.icon || '📌'} ${b.label} `,
+      }));
+    const seen = new Set(fromBudget.map(c => c.key));
+    const fallback = getCategoriesFor('expense', customCategories)
+      .filter(c => !seen.has(c.key))
+      .map(c => ({
         key: c.key,
         label: `${c.icon} ${c.label} `,
-      })),
-    ],
-    [customCategories],
-  );
+      }));
+    return [{ key: 'toate', label: 'Toate ' }, ...fromBudget, ...fallback];
+  }, [budgetCategories, customCategories, selectedHouseholdId]);
 
-  const getCatMeta = (key) => getCategoryMeta(key, 'expense', customCategories);
+  const getCatMeta = (key) =>
+    resolveCategoryMeta(key, {
+      type: 'expense',
+      budgetCategories: (budgetCategories || []).filter(
+        b => !selectedHouseholdId || b.householdId === selectedHouseholdId
+      ),
+      customCategories,
+    });
 
   const { isTablet, hPad, maxContentWidth } = useResponsive();
   const safeBottom = useSafeBottomPadding(28);

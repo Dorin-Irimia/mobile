@@ -1,7 +1,10 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
 
-export const DEFAULT_API_URL = 'http://192.168.1.230:3002';
+// Tailscale IP — funcționează oriunde are telefonul internet, nu se schimbă
+// la reboot router. Pentru testare locală fără VPN, schimbă din ServerConfig
+// la IP-ul LAN (ex. http://192.168.1.x:3002).
+export const DEFAULT_API_URL = 'http://100.121.100.74:3002';
 const API_URL_KEY = 'api_server_url';
 
 let _apiUrl = DEFAULT_API_URL;
