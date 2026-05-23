@@ -991,14 +991,39 @@ const useStore = create((set, get) => ({
   // ── Auth ────────────────────────────────────────────────────────────────────
   login: async (email, password) => {
     set({ isLoading: true, error: null });
+    const wasGuest = get().isGuest;
     try {
       const { data } = await api.post('/auth/login', { email: normalizeEmail(email), password });
       await saveAuth('accessToken', data.accessToken);
       await saveAuth('refreshToken', data.refreshToken);
       await saveAuth('user', data.user);
+      if (wasGuest) {
+        await removeAuth('isGuest');
+        setQueueDisabled(false);
+      }
+      // Switch the AsyncStorage scope to the new user. When coming from guest,
+      // we first need to copy the in-memory collections into the new scope so
+      // a crash between login and migration completion doesn't orphan data.
       setStorageScope(scopeForUser(data.user));
+      if (wasGuest) {
+        const s = get();
+        await Promise.all([
+          saveCache('vehicles', s.vehicles || []),
+          saveCache('invoices', s.invoices || []),
+          saveCache('fuel', s.fuelLogs || []),
+          saveCache('reminders', s.reminders || []),
+          saveCache('documents', s.documents || []),
+          saveCache('households', s.households || []),
+          saveCache('householdExpenses', s.householdExpenses || []),
+          saveCache('householdIncomes', s.householdIncomes || []),
+          saveCache('householdEvents', s.householdEvents || []),
+          saveCache('householdBills', s.householdBills || []),
+          saveCache('serviceRecords', s.serviceRecords || []),
+          saveCache('budgetCategories_all', s.budgetCategories || []),
+        ]);
+      }
       await get().loadQuickActions();
-      set({ user: data.user, isLoading: false });
+      set({ user: data.user, isGuest: false, isOnline: true, isLoading: false });
       return { success: true };
     } catch (e) {
       // Network error → try offline login with cached credentials
@@ -1027,15 +1052,38 @@ const useStore = create((set, get) => ({
   register: async (email, password, name, phone) => {
     set({ isLoading: true, error: null });
     const normalizedEmail = normalizeEmail(email);
+    const wasGuest = get().isGuest;
     try {
       const { data } = await api.post('/auth/register', { email: normalizedEmail, password, name, phone });
       await saveAuth('accessToken', data.accessToken);
       await saveAuth('refreshToken', data.refreshToken);
       await saveAuth('user', data.user);
       await removePendingRegistration();
+      // Same guest-cleanup as login(). See note above.
+      if (wasGuest) {
+        await removeAuth('isGuest');
+        setQueueDisabled(false);
+      }
       setStorageScope(scopeForUser(data.user));
+      if (wasGuest) {
+        const s = get();
+        await Promise.all([
+          saveCache('vehicles', s.vehicles || []),
+          saveCache('invoices', s.invoices || []),
+          saveCache('fuel', s.fuelLogs || []),
+          saveCache('reminders', s.reminders || []),
+          saveCache('documents', s.documents || []),
+          saveCache('households', s.households || []),
+          saveCache('householdExpenses', s.householdExpenses || []),
+          saveCache('householdIncomes', s.householdIncomes || []),
+          saveCache('householdEvents', s.householdEvents || []),
+          saveCache('householdBills', s.householdBills || []),
+          saveCache('serviceRecords', s.serviceRecords || []),
+          saveCache('budgetCategories_all', s.budgetCategories || []),
+        ]);
+      }
       await get().loadQuickActions();
-      set({ user: data.user, isLoading: false });
+      set({ user: data.user, isGuest: false, isOnline: true, isLoading: false });
       return { success: true };
     } catch (e) {
       if (isNetworkError(e)) {
@@ -1536,7 +1584,17 @@ const useStore = create((set, get) => ({
     }
   },
 
+  // Profile edits work even in guest mode — we patch the local user object
+  // in SecureStore and skip the API call entirely. When the user later
+  // upgrades to an account, the registration form captures fresh name/phone
+  // so this local-only profile data is informational, not portable.
   updateProfile: async (patch) => {
+    if (get().isGuest) {
+      const next = { ...(get().user || {}), ...patch };
+      await saveAuth('user', JSON.stringify(next));
+      set({ user: next });
+      return next;
+    }
     const { data } = await api.put('/auth/me', patch);
     await saveAuth('user', data);
     set({ user: data });
@@ -1544,8 +1602,8 @@ const useStore = create((set, get) => ({
   },
 
   fetchMe: async () => {
-    const { isOnline } = get();
-    if (!isOnline) return get().user;
+    const { isOnline, isGuest } = get();
+    if (isGuest || !isOnline) return get().user;
     const { data } = await api.get('/auth/me');
     const u = data.user || data;
     await saveAuth('user', u);
@@ -1554,6 +1612,15 @@ const useStore = create((set, get) => ({
   },
 
   uploadAvatar: async (asset) => {
+    if (get().isGuest) {
+      // Local-only: store the file URI directly. PdfViewer / ZoomableImage
+      // both already handle `file://` URIs, so the avatar shows up everywhere
+      // without uploading anything.
+      const next = { ...(get().user || {}), avatar: asset.uri };
+      await saveAuth('user', JSON.stringify(next));
+      set({ user: next });
+      return next;
+    }
     const fd = new FormData();
     const uri = asset.uri;
     const filename = uri.split('/').pop() || 'avatar.jpg';
@@ -1569,6 +1636,12 @@ const useStore = create((set, get) => ({
   },
 
   removeAvatar: async () => {
+    if (get().isGuest) {
+      const next = { ...(get().user || {}), avatar: null };
+      await saveAuth('user', JSON.stringify(next));
+      set({ user: next });
+      return next;
+    }
     const { data } = await api.delete('/auth/avatar');
     await saveAuth('user', data);
     set({ user: data });

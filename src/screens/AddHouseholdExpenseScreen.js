@@ -229,6 +229,15 @@ export default function AddHouseholdExpenseScreen({ navigation, route }) {
             <View style={styles.catGrid}>
               {CATEGORIES.map(c => {
                 const active = category === c.key;
+                // Compose the visible string defensively in one place — earlier
+                // we tried mixing JSX text nodes which on some Android builds
+                // dropped the label past the icon. A single template string
+                // renders consistently.
+                const label = [
+                  c.fromBudget ? '⭐' : '',
+                  c.icon || '',
+                  c.label || c.key || '',
+                ].filter(Boolean).join(' ');
                 return (
                   <TouchableOpacity
                     key={c.key}
@@ -240,7 +249,7 @@ export default function AddHouseholdExpenseScreen({ navigation, route }) {
                     ]}
                   >
                     <Text style={[styles.catText, { color: active ? '#fff' : T.ink2 }]}>
-                      {c.fromBudget ? '⭐ ' : ''}{c.icon} {c.label}
+                      {label}
                     </Text>
                   </TouchableOpacity>
                 );

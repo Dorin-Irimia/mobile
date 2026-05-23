@@ -383,7 +383,9 @@ export default function ProfileScreen({ navigation }) {
   }, [loadAll]);
 
   const avatarFullUri = user?.avatar
-    ? (user.avatar.startsWith('http') ? user.avatar : `${apiUrl}${user.avatar}`)
+    ? (user.avatar.startsWith('http') || user.avatar.startsWith('file:')
+        ? user.avatar
+        : `${apiUrl}${user.avatar}`)
     : null;
 
   const pickAvatar = async () => {
