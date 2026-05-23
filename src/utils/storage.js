@@ -73,7 +73,15 @@ export async function clearCache(key) {
   try { await AsyncStorage.removeItem(keyFor(key)); } catch {}
 }
 
+// Global gate set from the store. When true (guest mode), `enqueue` becomes
+// a no-op — there's no server to drain the queue against, so we don't want
+// AsyncStorage to grow forever with operations that will never run.
+let _queueDisabled = false;
+export function setQueueDisabled(v) { _queueDisabled = !!v; }
+export function isQueueDisabled() { return _queueDisabled; }
+
 export async function enqueue(op) {
+  if (_queueDisabled) return;
   try {
     const queue = await getQueue();
     const serialized = serializePayload(op.payload);

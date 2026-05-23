@@ -18,6 +18,11 @@ export function useNetworkMonitor() {
   const intervalRef = useRef(null);
 
   const checkServer = useCallback(async () => {
+    // Guest mode = no server. Skip every health check; keep isOnline false.
+    if (useStore.getState().isGuest) {
+      setOnline(false);
+      return;
+    }
     if (!hasNetwork.current) {
       if (!wasOffline.current) {
         wasOffline.current = true;
@@ -41,6 +46,13 @@ export function useNetworkMonitor() {
   }, [setOnline, syncOnReconnect]);
 
   useEffect(() => {
+    // Guest mode: we deliberately have no server, so any health check would
+    // just spin in vain. Force offline and short-circuit all polling.
+    if (useStore.getState().isGuest) {
+      setOnline(false);
+      return undefined;
+    }
+
     const unsubscribe = NetInfo.addEventListener(state => {
       const next = !!state.isConnected;
       hasNetwork.current = next;

@@ -54,6 +54,7 @@ import CustomCategoriesScreen from '../screens/CustomCategoriesScreen';
 import BudgetTrackerScreen from '../screens/BudgetTrackerScreen';
 import EditBudgetCategoryScreen from '../screens/EditBudgetCategoryScreen';
 import BudgetCategoryDetailScreen from '../screens/BudgetCategoryDetailScreen';
+import UpgradeToAccountScreen from '../screens/UpgradeToAccountScreen';
 import BillsScreen from '../screens/BillsScreen';
 import AddBillScreen from '../screens/AddBillScreen';
 
@@ -175,6 +176,7 @@ export default function AppNavigator() {
         <Stack.Screen name="BudgetTracker" component={BudgetTrackerScreen} />
         <Stack.Screen name="EditBudgetCategory" component={EditBudgetCategoryScreen} options={{ presentation: 'modal' }} />
         <Stack.Screen name="BudgetCategoryDetail" component={BudgetCategoryDetailScreen} />
+        <Stack.Screen name="UpgradeToAccount" component={UpgradeToAccountScreen} options={{ presentation: 'modal' }} />
         <Stack.Screen name="Bills" component={BillsScreen} />
         <Stack.Screen name="AddBill" component={AddBillScreen} options={{ presentation: 'modal' }} />
       </Stack.Navigator>

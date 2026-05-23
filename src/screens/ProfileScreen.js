@@ -247,6 +247,7 @@ function ModeSwitcher() {
 
 export default function ProfileScreen({ navigation }) {
   const user = useStore(s => s.user);
+  const isGuest = useStore(s => s.isGuest);
   const vehicles = useStore(s => s.vehicles);
   const documents = useStore(s => s.documents);
   const invoices = useStore(s => s.invoices);
@@ -679,6 +680,28 @@ export default function ProfileScreen({ navigation }) {
             />
           }
         >
+          {/* Banner: invitație de upgrade la cont când suntem în guest. Cel
+              mai vizibil loc — în vârful Profile-ului — pentru că aici userul
+              vine să verifice cine e logat. */}
+          {isGuest && (
+            <TouchableOpacity
+              activeOpacity={0.9}
+              onPress={() => navigation.navigate('UpgradeToAccount')}
+              style={styles.upgradeBanner}
+            >
+              <View style={styles.upgradeIconBox}>
+                <Text style={styles.upgradeIcon}>☁️</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.upgradeTitle}>Salvează datele în cloud</Text>
+                <Text style={styles.upgradeSub}>
+                  Acum totul e doar pe acest telefon. Cu un cont, ai backup, multi-device și partajare cu prietenii.
+                </Text>
+              </View>
+              <Text style={styles.upgradeArrow}>›</Text>
+            </TouchableOpacity>
+          )}
+
           {/* Informații personale */}
           <Card title="Informații personale">
             <Text style={styles.fieldLabel}>Nume complet</Text>
@@ -1232,6 +1255,23 @@ const styles = StyleSheet.create({
     paddingBottom: SPACING.xxxl,
     gap: SPACING.lg,
   },
+  upgradeBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    backgroundColor: T.brand,
+    borderRadius: RADIUS.xl,
+    padding: 16,
+    shadowColor: T.brand, shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35, shadowRadius: 12, elevation: 4,
+  },
+  upgradeIconBox: {
+    width: 48, height: 48, borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  upgradeIcon: { fontSize: 26 },
+  upgradeTitle: { fontSize: 15, color: '#fff', fontWeight: FONTS.bold },
+  upgradeSub: { fontSize: 11, color: 'rgba(255,255,255,0.92)', marginTop: 3, lineHeight: 15 },
+  upgradeArrow: { color: '#fff', fontSize: 26, fontWeight: '300' },
   card: {
     backgroundColor: T.card,
     borderRadius: RADIUS.lg,

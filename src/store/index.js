@@ -10,6 +10,7 @@ import {
   createClientId,
   formDataToObject,
   removePendingCreate,
+  setQueueDisabled,
 } from '../utils/storage';
 import { processSyncQueue, pullServerState } from '../utils/syncManager';
 import { DEFAULT_QUICK_ACTION_IDS, normalizeQuickActionIds } from '../utils/quickActions';
@@ -219,6 +220,9 @@ function householdExpenseFromPayload(fields, files, clientId) {
 
 const useStore = create((set, get) => ({
   user: null,
+  // Guest mode: app runs 100% locally — no server, no account. All actions
+  // skip API/queue and write directly to AsyncStorage cache.
+  isGuest: false,
   vehicles: [],
   invoices: [],
   reminders: [],
@@ -1059,19 +1063,420 @@ const useStore = create((set, get) => ({
   },
 
   logout: async () => {
-    try {
-      const refreshToken = await loadAuth('refreshToken');
-      await api.post('/auth/logout', { refreshToken });
-    } catch {}
-    await removeAuth('accessToken');
-    await removeAuth('refreshToken');
+    const wasGuest = get().isGuest;
+    if (!wasGuest) {
+      try {
+        const refreshToken = await loadAuth('refreshToken');
+        await api.post('/auth/logout', { refreshToken });
+      } catch {}
+      await removeAuth('accessToken');
+      await removeAuth('refreshToken');
+    }
     await removeAuth('user');
+    await removeAuth('isGuest');
+    setQueueDisabled(false);
     setStorageScope('anonymous');
-    set({ user: null, vehicles: [], invoices: [], reminders: [], documents: [], fuelLogs: [], notifications: [] });
+    set({
+      user: null,
+      isGuest: false,
+      vehicles: [], invoices: [], reminders: [], documents: [], fuelLogs: [], notifications: [],
+      households: [], householdExpenses: [], householdIncomes: [], householdEvents: [],
+      householdBills: [], serviceRecords: [], budgetCategories: [],
+    });
+  },
+
+  // Enter local-only mode: no server, no account. A synthetic "guest" user is
+  // persisted so the app navigator treats us as logged-in. Every store action
+  // already has an offline branch; we simply force isOnline=false forever and
+  // disable the queue (no point storing operations that will never drain).
+  continueAsGuest: async () => {
+    const guestUser = {
+      id: 'guest-local',
+      name: 'Local',
+      email: 'local@device',
+      avatar: null,
+      role: 'user',
+    };
+    setQueueDisabled(true);
+    setStorageScope(scopeForUser(guestUser));
+    await saveAuth('user', JSON.stringify(guestUser));
+    await saveAuth('isGuest', 'true');
+    set({ user: guestUser, isGuest: true, isOnline: false });
+    try { await get().loadQuickActions(); } catch {}
+    return { success: true };
+  },
+
+  // Convert a guest session into a real account. Currently we just clear the
+  // guest flag — data migration is handled separately by migrateGuestData().
+  exitGuestMode: async () => {
+    setQueueDisabled(false);
+    await saveAuth('isGuest', '');
+    set({ isGuest: false, user: null });
+  },
+
+  // Push every locally-stored guest item to the server, preserving relations
+  // by translating local-* IDs to the server IDs we get back. Must be called
+  // AFTER the user has a real (non-guest) auth token. Designed to be idempotent
+  // via clientId — re-running it won't create duplicates.
+  //
+  // Returns { migrated, failed, total } for the progress UI.
+  migrateGuestData: async (onProgress) => {
+    const state = get();
+    if (state.isGuest) throw new Error('Trebuie să fii logat cu cont real înainte de migrare.');
+
+    const idMap = {};        // localId  → serverId (used to fix FK refs)
+    let migrated = 0, failed = 0;
+    const log = (...a) => console.log('[migrate]', ...a);
+    const tr = (id) => (id && idMap[id]) || id;
+
+    // Local attachments stored in guest mode have `fileUrl` pointing at a
+    // `file://` URI on disk. To upload them along with their parent record we
+    // need to package each one as a multipart file part. Anything that isn't a
+    // file URI (e.g. already-uploaded server URL) is skipped — the server
+    // already has it.
+    const isLocalFile = (url) => typeof url === 'string' && url.startsWith('file:');
+    const appendLocalAttachments = (fd, attachments, fieldName = 'attachments') => {
+      let count = 0;
+      (attachments || []).forEach((att, i) => {
+        if (!att || !isLocalFile(att.fileUrl)) return;
+        fd.append(fieldName, {
+          uri: att.fileUrl,
+          name: att.fileName || `attachment-${i}`,
+          type: att.mimeType || 'application/octet-stream',
+        });
+        count++;
+      });
+      return count;
+    };
+
+    // Build the full work list up-front so progress UI knows the denominator.
+    const work = [
+      // 1. Roots: vehicles, households (no dependencies)
+      ...(state.vehicles || []).map(v => ({ type: 'vehicle', data: v })),
+      ...(state.households || []).map(h => ({ type: 'household', data: h })),
+
+      // 2. Vehicle children
+      ...(state.documents || []).map(d => ({ type: 'document', data: d })),
+      ...(state.invoices || []).map(i => ({ type: 'invoice', data: i })),
+      ...(state.fuelLogs || []).map(f => ({ type: 'fuel', data: f })),
+      ...(state.reminders || []).map(r => ({ type: 'reminder', data: r })),
+      ...(state.serviceRecords || []).map(s => ({ type: 'service', data: s })),
+
+      // 3. Household children
+      ...(state.budgetCategories || []).map(b => ({ type: 'budgetCategory', data: b })),
+      ...(state.householdBills || []).map(b => ({ type: 'householdBill', data: b })),
+      ...(state.householdExpenses || []).map(e => ({ type: 'householdExpense', data: e })),
+      ...(state.householdIncomes  || []).map(i => ({ type: 'householdIncome',  data: i })),
+      ...(state.householdEvents   || []).map(e => ({ type: 'householdEvent',   data: e })),
+    ];
+
+    const total = work.length;
+    onProgress?.({ done: 0, total, label: total ? 'Pregătesc datele…' : 'Nimic de migrat' });
+    if (total === 0) {
+      return { migrated: 0, failed: 0, total: 0 };
+    }
+
+    // Helper to build a stable clientId from the existing local id so a retry
+    // is idempotent on the server side (server's userId_clientId unique key
+    // returns the existing row instead of creating duplicates).
+    const cidOf = (item) => item.clientId || (typeof item.id === 'string' ? item.id : null);
+
+    for (const op of work) {
+      const { type, data } = op;
+      try {
+        let response = null;
+        switch (type) {
+          case 'vehicle': {
+            const body = {
+              clientId: cidOf(data),
+              plate: data.plate, brand: data.brand, model: data.model, year: data.year,
+              vin: data.vin || null, color: data.color || null, km: Number(data.km || 0),
+              fuel: data.fuel || 'Benzina', power: data.power || null,
+              category: data.category || 'masina',
+              itpDate: data.itpDate || null, rcaDate: data.rcaDate || null,
+              cascoDate: data.cascoDate || null, rovDate: data.rovDate || null,
+              purchaseDate: data.purchaseDate || null, purchaseKm: data.purchaseKm || null,
+            };
+            const r = await api.post('/vehicles', body);
+            response = r.data;
+            break;
+          }
+          case 'household': {
+            const body = {
+              clientId: cidOf(data),
+              name: data.name, address: data.address || null,
+              type: data.type || 'apartament',
+              rooms: data.rooms || null, surface: data.surface || null,
+              monthlyBudget: data.monthlyBudget || null,
+            };
+            const r = await api.post('/households', body);
+            response = r.data;
+            break;
+          }
+          case 'reminder': {
+            const body = {
+              clientId: cidOf(data),
+              title: data.title, dueDate: data.dueDate, type: data.type || 'altele',
+              repeat: data.repeat || 'none', isDone: !!data.isDone, notes: data.notes || null,
+              vehicleId: tr(data.vehicleId) || null,
+            };
+            const r = await api.post('/reminders', body);
+            response = r.data;
+            break;
+          }
+          case 'service': {
+            const body = {
+              clientId: cidOf(data),
+              vehicleId: tr(data.vehicleId),
+              date: data.date, km: data.km || null, type: data.type,
+              title: data.title, provider: data.provider || null,
+              cost: Number(data.cost || 0), upcoming: !!data.upcoming,
+              notes: data.notes || null,
+            };
+            if (!body.vehicleId) { failed++; continue; }
+            const r = await api.post('/service-records', body);
+            response = r.data;
+            break;
+          }
+          case 'budgetCategory': {
+            const body = {
+              clientId: cidOf(data),
+              householdId: tr(data.householdId),
+              key: data.key, label: data.label, icon: data.icon || '📦',
+              color: data.color || '#6B7280',
+              monthlyLimit: Number(data.monthlyLimit || 0),
+              sortOrder: Number(data.sortOrder || 0),
+            };
+            if (!body.householdId) { failed++; continue; }
+            const r = await api.post('/budgets/categories', body);
+            response = r.data;
+            break;
+          }
+          case 'householdBill': {
+            const body = {
+              clientId: cidOf(data),
+              householdId: tr(data.householdId),
+              provider: data.provider, name: data.name,
+              icon: data.icon || '📄', color: data.color || '#6B7280',
+              amount: Number(data.amount || 0), currency: data.currency || 'RON',
+              dueDate: data.dueDate, status: data.status || 'due',
+              recurring: data.recurring || 'lunar', notes: data.notes || null,
+            };
+            if (!body.householdId) { failed++; continue; }
+            const r = await api.post('/household-bills', body);
+            response = r.data;
+            break;
+          }
+          // Multipart endpoints (invoices/fuel/documents/expenses/incomes/events)
+          // — we POST without attachments for v1; user can re-attach files manually.
+          case 'invoice': {
+            const fd = new FormData();
+            fd.append('clientId', cidOf(data) || '');
+            fd.append('vehicleId', tr(data.vehicleId));
+            fd.append('title', data.title);
+            fd.append('amount', String(data.amount));
+            fd.append('currency', data.currency || 'RON');
+            fd.append('category', data.category || 'altele');
+            fd.append('date', data.date);
+            if (data.time) fd.append('time', data.time);
+            if (data.km) fd.append('km', String(data.km));
+            if (data.merchant) fd.append('merchant', data.merchant);
+            if (data.location) fd.append('location', data.location);
+            if (data.notes) fd.append('notes', data.notes);
+            if (!tr(data.vehicleId)) { failed++; continue; }
+            // Bundle locally-stored attachments so they ride along with the
+            // parent record — saves N extra requests per invoice.
+            appendLocalAttachments(fd, data.attachments, 'attachments');
+            const r = await api.post('/invoices', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+            response = r.data;
+            break;
+          }
+          case 'fuel': {
+            const fd = new FormData();
+            fd.append('clientId', cidOf(data) || '');
+            fd.append('vehicleId', tr(data.vehicleId));
+            fd.append('date', data.date);
+            if (data.time) fd.append('time', data.time);
+            fd.append('liters', String(data.liters));
+            fd.append('pricePerL', String(data.pricePerL));
+            fd.append('km', String(data.km));
+            if (data.station) fd.append('station', data.station);
+            if (data.location) fd.append('location', data.location);
+            if (data.fuelType) fd.append('fuelType', data.fuelType);
+            fd.append('fullTank', data.fullTank === false ? 'false' : 'true');
+            if (data.notes) fd.append('notes', data.notes);
+            if (!tr(data.vehicleId)) { failed++; continue; }
+            appendLocalAttachments(fd, data.attachments, 'attachments');
+            const r = await api.post('/fuel', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+            response = r.data;
+            break;
+          }
+          case 'document': {
+            const fd = new FormData();
+            fd.append('clientId', cidOf(data) || '');
+            if (data.vehicleId) fd.append('vehicleId', tr(data.vehicleId));
+            fd.append('name', data.name || 'Document');
+            fd.append('type', data.type || 'altele');
+            if (data.expiryDate) fd.append('expiryDate', data.expiryDate);
+            if (data.notes) fd.append('notes', data.notes);
+            // Documents store their file directly via `fileUrl`. The endpoint
+            // uses `upload.any()` so the field name is free — we use `file`.
+            if (isLocalFile(data.fileUrl)) {
+              fd.append('file', {
+                uri: data.fileUrl,
+                name: data.fileName || 'document',
+                type: data.mimeType || 'application/octet-stream',
+              });
+            }
+            const r = await api.post('/documents', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+            response = r.data;
+            break;
+          }
+          case 'householdExpense': {
+            const fd = new FormData();
+            fd.append('clientId', cidOf(data) || '');
+            fd.append('householdId', tr(data.householdId));
+            fd.append('title', data.title);
+            fd.append('amount', String(data.amount));
+            fd.append('currency', data.currency || 'RON');
+            fd.append('category', data.category || 'altele');
+            fd.append('date', data.date);
+            if (data.time) fd.append('time', data.time);
+            if (data.merchant) fd.append('merchant', data.merchant);
+            if (data.location) fd.append('location', data.location);
+            if (data.notes) fd.append('notes', data.notes);
+            if (data.source) fd.append('source', data.source);
+            if (!tr(data.householdId)) { failed++; continue; }
+            appendLocalAttachments(fd, data.attachments, 'attachments');
+            const r = await api.post('/household-expenses', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+            response = r.data;
+            break;
+          }
+          case 'householdIncome': {
+            const body = {
+              clientId: cidOf(data),
+              householdId: tr(data.householdId),
+              title: data.title, amount: Number(data.amount || 0),
+              currency: data.currency || 'RON', category: data.category || 'altele',
+              date: data.date, source: data.source || null,
+              recurring: data.recurring || 'none', notes: data.notes || null,
+            };
+            if (!body.householdId) { failed++; continue; }
+            const r = await api.post('/household-incomes', body);
+            response = r.data;
+            break;
+          }
+          case 'householdEvent': {
+            const body = {
+              clientId: cidOf(data),
+              householdId: tr(data.householdId),
+              title: data.title, type: data.type || 'altele',
+              startDate: data.startDate, startTime: data.startTime || null,
+              endDate: data.endDate || null, endTime: data.endTime || null,
+              location: data.location || null, notes: data.notes || null,
+              reminderMinutes: data.reminderMinutes || null,
+            };
+            if (!body.householdId) { failed++; continue; }
+            const r = await api.post('/household-events', body);
+            response = r.data;
+            break;
+          }
+          default:
+            log('unknown type', type); failed++; continue;
+        }
+        if (response?.id && data.id && data.id !== response.id) {
+          idMap[data.id] = response.id;
+        }
+        migrated++;
+      } catch (e) {
+        log('failed', type, data?.title || data?.name || data?.id, e?.response?.data?.error || e.message);
+        failed++;
+      }
+      onProgress?.({ done: migrated + failed, total, label: `Se sincronizează (${migrated + failed}/${total})…` });
+    }
+
+    // Refresh the store from server so we get the canonical post-migration state.
+    try {
+      onProgress?.({ done: total, total, label: 'Reîncarc datele de pe server…' });
+      const serverState = await pullServerState();
+      await get().applyServerState(serverState);
+      try { await get().fetchHouseholdBills(); } catch {}
+      try { await get().fetchServiceRecords(); } catch {}
+      try { await get().fetchBudgetCategories(); } catch {}
+    } catch {}
+
+    return { migrated, failed, total };
+  },
+
+  // Load all cached collections from AsyncStorage into the store. Used both
+  // by the regular auth restore (so offline-only items are visible while sync
+  // runs) and by the guest restore (where this is the only source of truth).
+  loadCachedDataFromDisk: async () => {
+    const [
+      vehicles, invoices, fuelLogs, reminders, documents, notifications, members, selectedVehicleId,
+      appMode, households, selectedHouseholdId, hExpenses, hIncomes, hEvents, hMembers, customCats,
+      bills, services, budgetCats,
+    ] = await Promise.all([
+      loadCache('vehicles'),
+      loadCache('invoices'),
+      loadCache('fuel'),
+      loadCache('reminders'),
+      loadCache('documents'),
+      loadCache('notifications'),
+      loadCache('vehicleMembersById'),
+      loadCache('selectedVehicleId'),
+      loadCache('appMode'),
+      loadCache('households'),
+      loadCache('selectedHouseholdId'),
+      loadCache('householdExpenses'),
+      loadCache('householdIncomes'),
+      loadCache('householdEvents'),
+      loadCache('householdMembersById'),
+      loadCache('customCategories'),
+      loadCache('householdBills'),
+      loadCache('serviceRecords'),
+      loadCache('budgetCategories_all'),
+    ]);
+    const savedMonthStart = await loadCache('monthStartDay');
+    set({
+      vehicles: vehicles || [],
+      invoices: invoices || [],
+      fuelLogs: fuelLogs || [],
+      reminders: reminders || [],
+      documents: documents || [],
+      notifications: notifications || [],
+      vehicleMembersById: members || {},
+      selectedVehicleId: selectedVehicleId || null,
+      appMode: appMode || null,
+      households: households || [],
+      selectedHouseholdId: selectedHouseholdId || null,
+      householdExpenses: hExpenses || [],
+      householdIncomes: hIncomes || [],
+      householdEvents: hEvents || [],
+      householdMembersById: hMembers || {},
+      customCategories: Array.isArray(customCats) ? customCats : [],
+      householdBills: bills || [],
+      serviceRecords: services || [],
+      budgetCategories: budgetCats || [],
+      monthStartDay: Math.min(28, Math.max(1, Number(savedMonthStart) || 1)),
+    });
+    try { await get().loadSuggestionsAndRecents(); } catch {}
   },
 
   restoreAuth: async () => {
     const stored = await loadAuth('user');
+    const isGuestFlag = await loadAuth('isGuest');
+    if (stored && isGuestFlag === 'true') {
+      try {
+        const user = JSON.parse(stored);
+        setQueueDisabled(true);
+        setStorageScope(scopeForUser(user));
+        set({ user, isGuest: true, isOnline: false });
+        try { await get().loadQuickActions(); } catch {}
+        await get().loadCachedDataFromDisk();
+        return;
+      } catch {}
+    }
     if (stored) {
       try {
         const user = JSON.parse(stored);

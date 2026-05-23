@@ -24,6 +24,7 @@ export default function AuthScreen() {
   const { isTablet, hPad } = useResponsive();
   const login = useStore(s => s.login);
   const register = useStore(s => s.register);
+  const continueAsGuest = useStore(s => s.continueAsGuest);
 
   const [showServerConfig, setShowServerConfig] = useState(false);
   const [tab, setTab] = useState(0);
@@ -291,6 +292,26 @@ export default function AuthScreen() {
               </View>
             </View>
 
+            <View style={styles.guestRow}>
+              <View style={styles.guestDivider} />
+              <Text style={styles.guestDividerText}>sau</Text>
+              <View style={styles.guestDivider} />
+            </View>
+            <TouchableOpacity
+              style={styles.guestBtn}
+              onPress={async () => {
+                try { await continueAsGuest(); } catch (e) { showError(e?.message || 'Nu pot porni modul local.'); }
+              }}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.guestBtnIcon}>📱</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.guestBtnTitle}>Continuă fără cont</Text>
+                <Text style={styles.guestBtnSub}>Aplicația ține totul local pe telefon — fără server, fără cont</Text>
+              </View>
+              <Text style={styles.guestBtnArrow}>›</Text>
+            </TouchableOpacity>
+
             <Text style={styles.footer}>Talon. © 2026</Text>
             <TouchableOpacity onPress={() => setShowServerConfig(true)} style={styles.serverConfigBtn}>
               <Text style={styles.serverConfigText}>⚙️ Configurare server</Text>
@@ -461,6 +482,24 @@ const styles = StyleSheet.create({
     color: '#fff',
     letterSpacing: 0.3,
   },
+  guestRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    marginTop: 24, marginBottom: 12, width: '100%',
+  },
+  guestDivider: { flex: 1, height: 1, backgroundColor: '#D8D7D2' },
+  guestDividerText: { fontSize: 11, color: '#6A6F78', fontWeight: FONTS.semibold, textTransform: 'uppercase', letterSpacing: 0.6 },
+  guestBtn: {
+    width: '100%',
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    backgroundColor: '#fff',
+    borderRadius: 22,
+    paddingVertical: 16, paddingHorizontal: 18,
+    borderWidth: 1.5, borderColor: '#E1E4EA',
+  },
+  guestBtnIcon: { fontSize: 28 },
+  guestBtnTitle: { fontSize: 15, color: '#0E1116', fontWeight: FONTS.bold },
+  guestBtnSub: { fontSize: 12, color: '#6A6F78', marginTop: 2, lineHeight: 16 },
+  guestBtnArrow: { fontSize: 24, color: '#A0A5AD', fontWeight: '300' },
   footer: {
     marginTop: 32,
     fontSize: 12,

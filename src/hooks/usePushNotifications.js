@@ -23,6 +23,7 @@ Notifications.setNotificationHandler({
 
 export function usePushNotifications(navigationRef) {
   const user = useStore(s => s.user);
+  const isGuest = useStore(s => s.isGuest);
   const notifListener = useRef(null);
   const responseListener = useRef(null);
   const registered = useRef(false);
@@ -33,8 +34,15 @@ export function usePushNotifications(navigationRef) {
     registered.current = true;
 
     setupNotificationChannel();
-    registerToken();
-    checkReminders();
+    // Local notifications work without a server — only the push-token
+    // registration with our backend needs to be skipped in guest mode.
+    if (!isGuest) {
+      registerToken();
+      checkReminders();
+    } else {
+      // Still ask for OS permission so scheduled local notifications can fire.
+      ensureLocalPermission();
+    }
     rescheduleAllVehicleDeadlines();
 
     // Refresh notifications list when one arrives in foreground
@@ -150,6 +158,19 @@ async function checkReminders() {
   } catch {
     // Silently ignore — offline or server down
   }
+}
+
+// Lightweight permission request used in guest mode. We don't need a push
+// token (no server to send anything), but local schedule_notification_async
+// only fires if the OS-level permission was granted.
+async function ensureLocalPermission() {
+  try {
+    const { status: existing } = await Notifications.getPermissionsAsync();
+    if (existing === 'granted') return;
+    await Notifications.requestPermissionsAsync({
+      ios: { allowAlert: true, allowBadge: true, allowSound: true },
+    });
+  } catch {}
 }
 
 // Re-arm local deadline notifications on app start so that ITP/RCA/CASCO/Rov
