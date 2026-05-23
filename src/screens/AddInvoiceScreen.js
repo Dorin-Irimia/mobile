@@ -369,6 +369,66 @@ export default function AddInvoiceScreen({ navigation, route }) {
             />
           </View>
 
+          {/* Sincronizare cu cheltuielile casnice — feature highlight. Mutat
+              sus și colorat ca să nu se piardă. */}
+          {households.length > 0 && (
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => setSyncToHousehold(v => !v)}
+              style={[styles.syncCard, syncToHousehold && styles.syncCardActive]}
+            >
+              <View style={styles.syncRow}>
+                <View style={[styles.syncBadge, syncToHousehold && styles.syncBadgeActive]}>
+                  <Text style={styles.syncBadgeIcon}>🏠</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.syncTitle}>
+                    Adaugă și la cheltuielile casei
+                  </Text>
+                  <Text style={styles.syncSub}>
+                    {syncToHousehold
+                      ? 'Activ — aceeași sumă apare ca cheltuială casnică în categoria „transport".'
+                      : 'O singură atingere și factura intră automat și în portofelul casei.'}
+                  </Text>
+                </View>
+                <Switch
+                  value={syncToHousehold}
+                  onValueChange={setSyncToHousehold}
+                  trackColor={{ false: T.line, true: T.brand }}
+                  thumbColor="#fff"
+                  ios_backgroundColor={T.line}
+                />
+              </View>
+              {syncToHousehold && households.length > 1 && (
+                <View style={{ marginTop: 12 }}>
+                  <Text style={styles.syncPickerLabel}>Locuință:</Text>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={{ gap: 8, paddingTop: 6 }}
+                  >
+                    {households.map(h => {
+                      const active = h.id === syncHouseholdId;
+                      return (
+                        <TouchableOpacity
+                          key={h.id}
+                          onPress={() => setSyncHouseholdId(h.id)}
+                          style={{
+                            paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999,
+                            backgroundColor: active ? T.brand : T.card,
+                            borderWidth: 1, borderColor: active ? T.brand : T.line,
+                          }}
+                        >
+                          <Text style={{ fontSize: 12, fontWeight: '600', color: active ? '#fff' : T.ink2 }}>{h.name}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              )}
+            </TouchableOpacity>
+          )}
+
           {/* Atașamente */}
           <View style={styles.card}>
             <AttachmentsField
@@ -377,46 +437,6 @@ export default function AddInvoiceScreen({ navigation, route }) {
               maxFiles={20}
             />
           </View>
-
-          {/* Sincronizare cu cheltuielile casnice */}
-          {households.length > 0 && (
-            <View style={styles.card}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.label}>🏠 Adaugă și la cheltuielile casei</Text>
-                  <Text style={[styles.helper, { marginTop: 4 }]}>
-                    Aceeași sumă apare automat ca o cheltuială casnică (categorie „transport"). Se sincronizează la editare/ștergere.
-                  </Text>
-                </View>
-                <Switch
-                  value={syncToHousehold}
-                  onValueChange={setSyncToHousehold}
-                  trackColor={{ false: T.line, true: T.brandTint2 }}
-                  thumbColor={syncToHousehold ? T.brand : '#fff'}
-                />
-              </View>
-              {syncToHousehold && households.length > 1 && (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 12 }} contentContainerStyle={{ gap: 8 }}>
-                  {households.map(h => {
-                    const active = h.id === syncHouseholdId;
-                    return (
-                      <TouchableOpacity
-                        key={h.id}
-                        onPress={() => setSyncHouseholdId(h.id)}
-                        style={{
-                          paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999,
-                          backgroundColor: active ? T.brand : T.card,
-                          borderWidth: 1, borderColor: active ? T.brand : T.line,
-                        }}
-                      >
-                        <Text style={{ fontSize: 12, fontWeight: '600', color: active ? '#fff' : T.ink2 }}>{h.name}</Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
-              )}
-            </View>
-          )}
 
           {/* Note */}
           <View style={styles.card}>
@@ -491,6 +511,32 @@ const styles = StyleSheet.create({
   },
   hint: { fontSize: 11, color: T.ink4, marginTop: 4, marginBottom: SPACING.sm },
   helper: { fontSize: 11, color: T.ink3, lineHeight: 16 },
+
+  syncCard: {
+    backgroundColor: T.brandTint,
+    borderRadius: RADIUS.lg,
+    padding: 16,
+    borderWidth: 1.5,
+    borderColor: T.brandTint2,
+    ...SHADOW.sm,
+  },
+  syncCardActive: {
+    backgroundColor: '#FFF5EC',
+    borderColor: T.brand,
+    borderWidth: 2,
+  },
+  syncRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  syncBadge: {
+    width: 44, height: 44, borderRadius: 12,
+    backgroundColor: '#fff',
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: T.brandTint2,
+  },
+  syncBadgeActive: { backgroundColor: T.brand, borderColor: T.brand },
+  syncBadgeIcon: { fontSize: 22 },
+  syncTitle: { fontSize: 14, fontWeight: FONTS.bold, color: T.brandDark },
+  syncSub: { fontSize: 11, color: T.brandDark, opacity: 0.8, marginTop: 2, lineHeight: 15 },
+  syncPickerLabel: { fontSize: 11, color: T.brandDark, fontWeight: FONTS.semibold },
   input: {
     borderWidth: 1.5,
     borderColor: T.line,

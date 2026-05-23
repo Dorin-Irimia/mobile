@@ -1783,11 +1783,59 @@ const useStore = create((set, get) => ({
     await saveCache('invoices', get().invoices);
   },
 
+  // Same semantics as deleteFuelLog — handle local-only items, offline queue,
+  // 404-as-success, and clean up the linked household expense if any.
   deleteInvoice: async (id) => {
-    if (!get().isOnline) throw new OfflineActionError();
-    await api.delete(`/invoices/${id}`);
+    const item = get().invoices.find(i => i.id === id);
+    const isLocalOnly = item?._offline && String(id).startsWith('local-');
+    const linkedExpenseId = item?.linkedHouseholdExpenseId
+      || get().householdExpenses.find(e => e.source === 'invoice' && e.sourceId === id)?.id;
+
+    if (isLocalOnly) {
+      await removePendingCreate('invoices', item.clientId || id);
+      set(s => ({ invoices: s.invoices.filter(i => i.id !== id) }));
+      await saveCache('invoices', get().invoices);
+      if (linkedExpenseId) {
+        await removePendingCreate('householdExpenses', linkedExpenseId);
+        set(s => ({ householdExpenses: s.householdExpenses.filter(e => e.id !== linkedExpenseId) }));
+        await saveCache('householdExpenses', get().householdExpenses);
+      }
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
+      return;
+    }
+
+    if (!get().isOnline) {
+      set(s => ({ invoices: s.invoices.filter(i => i.id !== id) }));
+      await saveCache('invoices', get().invoices);
+      if (linkedExpenseId) {
+        set(s => ({ householdExpenses: s.householdExpenses.filter(e => e.id !== linkedExpenseId) }));
+        await saveCache('householdExpenses', get().householdExpenses);
+      }
+      await enqueue({
+        entity: 'invoices',
+        action: 'delete',
+        method: 'DELETE',
+        endpoint: `/invoices/${id}`,
+        payload: null,
+        localId: id,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
+      return;
+    }
+
+    try {
+      await api.delete(`/invoices/${id}`);
+    } catch (e) {
+      if (e?.response?.status !== 404) throw e;
+    }
     set(s => ({ invoices: s.invoices.filter(i => i.id !== id) }));
     await saveCache('invoices', get().invoices);
+    if (linkedExpenseId) {
+      set(s => ({ householdExpenses: s.householdExpenses.filter(e => e.id !== linkedExpenseId) }));
+      await saveCache('householdExpenses', get().householdExpenses);
+    }
   },
 
   // ── Reminders ───────────────────────────────────────────────────────────────
@@ -1978,11 +2026,67 @@ const useStore = create((set, get) => ({
     return data;
   },
 
+  // Delete a fuel log. Handles three cases:
+  //   1. Online + real server ID  →  DELETE on server, drop locally
+  //   2. Online + local-xxx (queued create, not yet synced)
+  //                              →  drop from queue + drop locally
+  //   3. Offline                  →  drop locally + enqueue DELETE if it had a server ID
+  // Also removes any locally-linked HouseholdExpense from cache so the user
+  // doesn't see a phantom expense after deletion.
   deleteFuelLog: async (id) => {
-    if (!get().isOnline) throw new OfflineActionError();
-    await api.delete(`/fuel/${id}`);
+    const item = get().fuelLogs.find(f => f.id === id);
+    const isLocalOnly = item?._offline && String(id).startsWith('local-');
+    const linkedExpenseId = item?.linkedHouseholdExpenseId
+      || get().householdExpenses.find(e => e.source === 'fuel' && e.sourceId === id)?.id;
+
+    if (isLocalOnly) {
+      // Cancel the pending create — nothing on server to delete.
+      await removePendingCreate('fuelLogs', item.clientId || id);
+      set(s => ({ fuelLogs: s.fuelLogs.filter(f => f.id !== id) }));
+      await saveCache('fuel', get().fuelLogs);
+      if (linkedExpenseId) {
+        await removePendingCreate('householdExpenses', linkedExpenseId);
+        set(s => ({ householdExpenses: s.householdExpenses.filter(e => e.id !== linkedExpenseId) }));
+        await saveCache('householdExpenses', get().householdExpenses);
+      }
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
+      return;
+    }
+
+    if (!get().isOnline) {
+      set(s => ({ fuelLogs: s.fuelLogs.filter(f => f.id !== id) }));
+      await saveCache('fuel', get().fuelLogs);
+      if (linkedExpenseId) {
+        set(s => ({ householdExpenses: s.householdExpenses.filter(e => e.id !== linkedExpenseId) }));
+        await saveCache('householdExpenses', get().householdExpenses);
+      }
+      await enqueue({
+        entity: 'fuelLogs',
+        action: 'delete',
+        method: 'DELETE',
+        endpoint: `/fuel/${id}`,
+        payload: null,
+        localId: id,
+      });
+      const queue = await getQueue();
+      set({ pendingCount: queue.length });
+      return;
+    }
+
+    try {
+      await api.delete(`/fuel/${id}`);
+    } catch (e) {
+      // If the server says it's already gone, treat that as success — the
+      // user's intent is "make this disappear".
+      if (e?.response?.status !== 404) throw e;
+    }
     set(s => ({ fuelLogs: s.fuelLogs.filter(f => f.id !== id) }));
     await saveCache('fuel', get().fuelLogs);
+    if (linkedExpenseId) {
+      set(s => ({ householdExpenses: s.householdExpenses.filter(e => e.id !== linkedExpenseId) }));
+      await saveCache('householdExpenses', get().householdExpenses);
+    }
   },
 
   addFuelAttachments: async (id, formData) => {
