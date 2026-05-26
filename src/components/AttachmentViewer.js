@@ -22,14 +22,22 @@ export default function AttachmentViewer({ visible, attachment, onClose, onDelet
   if (!attachment) return null;
 
   const apiUrl = getApiUrl();
-  const fullUrl = attachment.fileUrl?.startsWith('http') || attachment.fileUrl?.startsWith('file:')
-    ? attachment.fileUrl
-    : `${apiUrl}${attachment.fileUrl}`;
+  const rawUrl = attachment.fileUrl || '';
+  // file:// (cache/document dir) și content:// (provider Android, ex. Drive)
+  // sunt URI-uri locale care nu trebuie prefixate cu API URL.
+  const isLocalUri = rawUrl.startsWith('file:') || rawUrl.startsWith('content:');
+  const fullUrl = rawUrl.startsWith('http') || isLocalUri
+    ? rawUrl
+    : `${apiUrl}${rawUrl}`;
   const isImage = attachment.kind === 'image' || (attachment.mimeType || '').startsWith('image/');
   const isPdf = attachment.kind === 'pdf' || (attachment.mimeType || '') === 'application/pdf' || /\.pdf$/i.test(attachment.fileName || '');
   const { width, height } = Dimensions.get('window');
 
-  const downloadToFile = async () => {
+  // Pentru fișierele locale (guest mode) URL-ul e deja un path către fișierul
+  // de pe disc — nu mai descărcăm nimic. Pentru cele de pe server, descărcăm
+  // în cache ca să le putem da share-uitorului OS.
+  const ensureLocalCopy = async () => {
+    if (isLocalUri) return fullUrl;
     const safeName = (attachment.fileName || 'fisier').replace(/[^\w.\-]/g, '_');
     const dest = `${FileSystem.cacheDirectory}${Date.now()}-${safeName}`;
     const result = await FileSystem.downloadAsync(fullUrl, dest);
@@ -39,7 +47,7 @@ export default function AttachmentViewer({ visible, attachment, onClose, onDelet
   const handleShare = async () => {
     setBusy(true);
     try {
-      const uri = await downloadToFile();
+      const uri = await ensureLocalCopy();
       const canShare = await Sharing.isAvailableAsync();
       if (canShare) {
         await Sharing.shareAsync(uri, {

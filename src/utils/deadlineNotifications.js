@@ -63,9 +63,9 @@ export async function scheduleDeadlineNotifications({
   const now = Date.now();
   const ids = [];
   for (const days of leadDays) {
-    const trigger = new Date(target);
-    trigger.setDate(trigger.getDate() - Number(days || 0));
-    if (trigger.getTime() <= now + 60_000) continue;
+    const triggerDate = new Date(target);
+    triggerDate.setDate(triggerDate.getDate() - Number(days || 0));
+    if (triggerDate.getTime() <= now + 60_000) continue;
 
     try {
       const id = await Notifications.scheduleNotificationAsync({
@@ -75,7 +75,10 @@ export async function scheduleDeadlineNotifications({
           sound: 'default',
           data: { ...(data || {}), key, daysBefore: days },
         },
-        trigger,
+        // SDK 54+ așteaptă obiect tipat. Shorthand-ul "trigger: Date" nu mai
+        // este garantat; formatul DATE este forma stabilă pentru o programare
+        // la un moment fix în timp.
+        trigger: { type: 'date', date: triggerDate },
       });
       ids.push(id);
     } catch {

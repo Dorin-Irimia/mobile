@@ -393,7 +393,15 @@ export default function DocumentsScreen({ navigation }) {
   const renderDocItem = (doc) => {
     const days = doc.expiryDate ? daysUntil(doc.expiryDate) : null;
     const isImage = (doc.mimeType || '').startsWith('image/');
-    const fullUrl = doc.fileUrl?.startsWith('http') ? doc.fileUrl : `${apiUrl}${doc.fileUrl || ''}`;
+    // URI-uri locale (guest mode sau optimistic offline) sunt deja absolute:
+    // file:// pe Android/iOS, content:// pentru fișiere selectate din provider.
+    // Doar URL-urile relative ale serverului (ex. "/uploads/...") au nevoie
+    // de prefix cu API URL.
+    const rawUrl = doc.fileUrl || '';
+    const isLocalUri = rawUrl.startsWith('file:') || rawUrl.startsWith('content:');
+    const fullUrl = rawUrl.startsWith('http') || isLocalUri
+      ? rawUrl
+      : `${apiUrl}${rawUrl}`;
     const canDelete = canDeleteDoc(doc);
     return (
       <TouchableOpacity

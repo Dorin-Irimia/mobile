@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
+import * as FileSystem from 'expo-file-system/legacy';
 import api, { setApiDisabled } from '../api/client';
 import {
   saveCache,
@@ -186,13 +187,62 @@ function documentFromPayload(fields, files, clientId) {
     name: fields.name,
     type: fields.type,
     vehicleId: fields.vehicleId || null,
+    folderId: fields.folderId || null,
+    notes: fields.notes || null,
     expiryDate: fields.expiryDate || null,
     fileUrl: firstFile?.uri || null,
+    fileName: firstFile?.name || null,
+    mimeType: firstFile?.type || null,
+    fileSize: firstFile?.size || null,
     isSigned: false,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     _offline: true,
   };
+}
+
+// Mută fișierul ales din cacheDirectory (volatil — SO-ul îl poate șterge) în
+// documentDirectory, ca să rămână accesibil între restart-uri în modul guest.
+// Întoarce calea nouă (sau cea originală dacă era deja în documentDirectory).
+// Updatează și mărimea fișierului dacă era 0/lipsește.
+async function persistGuestFile(srcUri, clientId, fileName) {
+  if (!srcUri) return { uri: srcUri, size: 0 };
+  // Deja persistent — nu copiem din nou (idempotent dacă se reapelează).
+  const docDir = FileSystem.documentDirectory || '';
+  if (docDir && srcUri.startsWith(docDir)) {
+    try {
+      const info = await FileSystem.getInfoAsync(srcUri);
+      return { uri: srcUri, size: info.size || 0 };
+    } catch {
+      return { uri: srcUri, size: 0 };
+    }
+  }
+  const ext = (fileName?.match(/\.[^.]+$/)?.[0] || '').toLowerCase();
+  const dir = `${docDir}guest-docs/`;
+  try { await FileSystem.makeDirectoryAsync(dir, { intermediates: true }); } catch {}
+  const dest = `${dir}${clientId}${ext}`;
+  await FileSystem.copyAsync({ from: srcUri, to: dest });
+  let size = 0;
+  try {
+    const info = await FileSystem.getInfoAsync(dest);
+    size = info.size || 0;
+  } catch {}
+  return { uri: dest, size };
+}
+
+// Înlocuiește URI-ul fișierului dintr-un FormData (cel din parts[]) cu o
+// versiune persistentă. Necesar ca să nu se piardă fișierul nici dacă user-ul
+// trece pe online după ce SO-ul a curățat cache-ul.
+function rewriteFormDataFileUri(formData, newUri) {
+  const parts = formData?._parts;
+  if (!Array.isArray(parts)) return;
+  for (let i = 0; i < parts.length; i++) {
+    const [, value] = parts[i];
+    if (value && typeof value === 'object' && value.uri && value.uri !== newUri) {
+      value.uri = newUri;
+      break; // Documents au exact un fișier per upload.
+    }
+  }
 }
 
 function householdExpenseFromPayload(fields, files, clientId) {
@@ -742,11 +792,64 @@ const useStore = create((set, get) => ({
     return quickActionIds;
   },
 
+  // Custom categories — cross-device prin /api/custom-categories. Pe guest
+  // sau offline, lucrăm doar local; la prima sincronizare online toate
+  // categoriile create local sunt push-uite spre server (vezi syncCustomCategories).
   loadCustomCategories: async () => {
-    const saved = await loadCache('customCategories');
-    const list = Array.isArray(saved) ? saved : [];
-    set({ customCategories: list });
-    return list;
+    const cached = await loadCache('customCategories');
+    // Migrație: orice intrare cache veche FĂRĂ `id` server (versiunile vechi
+    // ale aplicației nu sincronizau cu server-ul) e marcată _unsynced ca să
+    // fie push-uită la primul login online.
+    const cachedList = (Array.isArray(cached) ? cached : []).map((c) =>
+      c.id && !c._unsynced ? c : { ...c, _unsynced: true }
+    );
+    set({ customCategories: cachedList });
+
+    if (get().isGuest || !get().isOnline) return cachedList;
+
+    try {
+      const { data } = await api.get('/custom-categories');
+      // Server este sursa de adevăr pentru entry-urile sincronizate; locals
+      // încă _unsynced rămân până la următorul push.
+      const byKey = new Map(data.map((c) => [c.key, c]));
+      for (const local of cachedList) {
+        if (!byKey.has(local.key) && local._unsynced) {
+          byKey.set(local.key, local);
+        }
+      }
+      const merged = Array.from(byKey.values());
+      set({ customCategories: merged });
+      await saveCache('customCategories', merged);
+      // Push entry-urile încă nesincronizate.
+      get().syncCustomCategories().catch(() => {});
+      return merged;
+    } catch {
+      return cachedList;
+    }
+  },
+
+  // Trimite la server orice categorie marcată _unsynced. Idempotent prin
+  // clientId. Apelat de loadCustomCategories după conectare.
+  syncCustomCategories: async () => {
+    if (get().isGuest || !get().isOnline) return;
+    const pending = get().customCategories.filter((c) => c._unsynced);
+    if (pending.length === 0) return;
+    for (const cat of pending) {
+      try {
+        const { data } = await api.post('/custom-categories', {
+          clientId: cat.clientId || cat.key,
+          key: cat.key, label: cat.label, icon: cat.icon, color: cat.color,
+          type: cat.type || 'expense',
+        });
+        const list = get().customCategories.map((c) =>
+          c.key === cat.key ? { ...data, _unsynced: false } : c
+        );
+        set({ customCategories: list });
+        await saveCache('customCategories', list);
+      } catch {
+        // Lăsăm pe _unsynced ca să retentăm mai târziu.
+      }
+    }
   },
 
   saveCustomCategories: async (list) => {
@@ -757,23 +860,58 @@ const useStore = create((set, get) => ({
   },
 
   addCustomCategory: async (cat) => {
-    const list = [...get().customCategories, cat];
+    const clientId = cat.clientId || cat.key;
+    const local = { ...cat, clientId, _unsynced: true };
+    const list = [...get().customCategories, local];
     set({ customCategories: list });
     await saveCache('customCategories', list);
-    return list;
+
+    if (!get().isGuest && get().isOnline) {
+      try {
+        const { data } = await api.post('/custom-categories', {
+          clientId, key: cat.key, label: cat.label,
+          icon: cat.icon, color: cat.color, type: cat.type || 'expense',
+        });
+        const updated = get().customCategories.map((c) =>
+          c.key === cat.key ? { ...data, _unsynced: false } : c
+        );
+        set({ customCategories: updated });
+        await saveCache('customCategories', updated);
+      } catch {
+        // Rămâne _unsynced — preluăm la următorul loadCustomCategories.
+      }
+    }
+    return get().customCategories;
   },
 
   updateCustomCategory: async (key, patch) => {
     const list = get().customCategories.map(c => c.key === key ? { ...c, ...patch } : c);
     set({ customCategories: list });
     await saveCache('customCategories', list);
-    return list;
+
+    if (!get().isGuest && get().isOnline) {
+      try {
+        await api.put(`/custom-categories/${encodeURIComponent(key)}`, patch);
+      } catch {
+        // Marcăm intrarea ca _unsynced ca să fie reîncercată.
+        const retry = get().customCategories.map((c) =>
+          c.key === key ? { ...c, _unsynced: true } : c
+        );
+        set({ customCategories: retry });
+        await saveCache('customCategories', retry);
+      }
+    }
+    return get().customCategories;
   },
 
   removeCustomCategory: async (key) => {
     const list = get().customCategories.filter(c => c.key !== key);
     set({ customCategories: list });
     await saveCache('customCategories', list);
+
+    if (!get().isGuest && get().isOnline) {
+      try { await api.delete(`/custom-categories/${encodeURIComponent(key)}`); } catch {}
+    }
     return list;
   },
 
@@ -1667,6 +1805,15 @@ const useStore = create((set, get) => ({
   },
 
   setPushToken: async (token) => {
+    // Guest/offline mode: notificările locale (deadline-uri, test) merg fără
+    // niciun token de la server. Doar memorăm valoarea pe user-ul local ca să
+    // știm starea toggle-ului între restart-uri.
+    if (get().isGuest || !get().isOnline) {
+      const next = { ...(get().user || {}), pushToken: token };
+      await saveAuth('user', JSON.stringify(next));
+      set({ user: next });
+      return next;
+    }
     const { data } = await api.put('/auth/push-token', { pushToken: token });
     await saveAuth('user', data);
     set({ user: data });
@@ -2025,6 +2172,23 @@ const useStore = create((set, get) => ({
     const { fields, files } = payloadSnapshot(formData);
 
     if (!isOnline || get().isGuest) {
+      // Cache-ul poate fi curățat de SO oricând — în guest mode am pierde
+      // fișierul. Îl copiem în documentDirectory + 'guest-docs/' și
+      // updatăm și URI-ul din FormData ca să meargă și la drain-ul
+      // queue-ului dacă userul trece pe online.
+      const firstFile = files?.[0];
+      if (firstFile?.uri) {
+        try {
+          const { uri: persistentUri, size } = await persistGuestFile(
+            firstFile.uri, clientId, firstFile.name,
+          );
+          rewriteFormDataFileUri(formData, persistentUri);
+          firstFile.uri = persistentUri;
+          if (!firstFile.size) firstFile.size = size;
+        } catch (e) {
+          console.warn('Could not persist guest doc file:', e?.message);
+        }
+      }
       const optimistic = documentFromPayload(fields, files, clientId);
       set(s => ({ documents: [optimistic, ...s.documents] }));
       await saveCache('documents', get().documents);

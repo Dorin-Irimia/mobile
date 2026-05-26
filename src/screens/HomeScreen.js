@@ -178,9 +178,12 @@ export default function HomeScreen({ navigation }) {
 
   const { width, isTablet, hPad, maxContentWidth } = useResponsive();
   const railCardW = isTablet ? 184 : 158;
+  // Pe telefon vrem mereu minim 2 coloane — la 158 minWidth, dispozitivele
+  // sub ~390px (Pixel 4a, S10e, etc.) cădeau pe 1 coloană și grid-ul arăta
+  // ca o listă. 140 acoperă toate telefoanele moderne (≥360px) cu 2 col.
   const quickActionGrid = getGridColumns(
     Math.min(width, maxContentWidth),
-    isTablet ? 210 : 158,
+    isTablet ? 210 : 140,
     SPACING.md,
     hPad,
   );

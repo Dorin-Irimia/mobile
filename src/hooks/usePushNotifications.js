@@ -209,6 +209,23 @@ async function rescheduleAllDocumentDeadlines() {
  */
 export async function sendTestLocalNotification() {
   try {
+    // Asigurăm permisiunea + channel-ul Android înainte să programăm. Dacă
+    // user-ul a refuzat în trecut și acum a activat manual din Setări, fără
+    // verificarea asta apelul ar fi reușit dar notificarea nu ar fi apărut.
+    if (Platform.OS === 'android') {
+      await Notifications.setNotificationChannelAsync('default', {
+        name: 'Urbio Auto',
+        importance: Notifications.AndroidImportance.MAX,
+        sound: 'default',
+      });
+    }
+    const perm = await Notifications.getPermissionsAsync();
+    if (perm.status !== 'granted') {
+      const ask = await Notifications.requestPermissionsAsync();
+      if (ask.status !== 'granted') return false;
+    }
+    // trigger: null → firește imediat. Mai sigur decât `{ seconds: 1 }` care
+    // în expo-notifications 0.32 (SDK 54) nu mai e acceptat ca shorthand.
     await Notifications.scheduleNotificationAsync({
       content: {
         title: '🚗 Test notificare Urbio Auto',
@@ -216,7 +233,7 @@ export async function sendTestLocalNotification() {
         sound: 'default',
         data: { test: true },
       },
-      trigger: { seconds: 1 },
+      trigger: null,
     });
     return true;
   } catch (e) {
