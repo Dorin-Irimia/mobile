@@ -287,6 +287,11 @@ export default function HouseholdExpensesScreen({ navigation }) {
             <Text style={[styles.itemCat, { color: meta.color, backgroundColor: meta.bg }]}>
               {meta.label}
             </Text>
+            {item.paymentMethod && (
+              <Text style={styles.itemHh}>
+                {item.paymentMethod === 'cash' ? '💵 Cash' : '💳 Card'}
+              </Text>
+            )}
             {households.length > 1 && household && (
               <Text style={styles.itemHh}>{household.name}</Text>
             )}

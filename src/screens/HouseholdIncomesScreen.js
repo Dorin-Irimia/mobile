@@ -233,6 +233,11 @@ export default function HouseholdIncomesScreen({ navigation }) {
           <Text style={styles.itemTitle} numberOfLines={1}>{item.title}</Text>
           <View style={styles.itemMetaRow}>
             <Text style={[styles.itemCat, { color: meta.color, backgroundColor: meta.bg }]}>{meta.label}</Text>
+            {item.paymentMethod && (
+              <Text style={styles.itemHh}>
+                {item.paymentMethod === 'cash' ? '💵 Cash' : '💳 Card'}
+              </Text>
+            )}
             {households.length > 1 && household && <Text style={styles.itemHh}>{household.name}</Text>}
             {item.recurring && item.recurring !== 'none' && (
               <Text style={styles.itemRecurring}>🔁 {item.recurring}</Text>

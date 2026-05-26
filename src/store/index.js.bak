@@ -210,8 +210,6 @@ function householdExpenseFromPayload(fields, files, clientId) {
     location: fields.location || null,
     notes: fields.notes || null,
     splitMode: fields.splitMode || 'single',
-    paymentMethod: fields.paymentMethod || null,
-    fromIncomeId: fields.fromIncomeId || null,
     customFields: parseCustomFields(fields.customFields),
     attachments: optimisticAttachments(files),
     createdAt: new Date().toISOString(),
@@ -273,7 +271,7 @@ const useStore = create((set, get) => ({
   // ── Households ─────────────────────────────────────────────────────────────
   fetchHouseholds: async () => {
     const { isOnline } = get();
-    if (!isOnline || get().isGuest) {
+    if (!isOnline) {
       const cached = await loadCache('households');
       if (cached) {
         const merged = await mergeWithOfflineQueue(cached, get().households, 'households');
@@ -308,7 +306,7 @@ const useStore = create((set, get) => ({
     const clientId = createClientId('household');
     const body = { ...payload, clientId };
 
-    if (!isOnline || get().isGuest) {
+    if (!isOnline) {
       const optimistic = {
         ...payload,
         id: clientId,
@@ -351,7 +349,7 @@ const useStore = create((set, get) => ({
     }));
     await saveCache('households', get().households);
 
-    if (!isOnline || get().isGuest) {
+    if (!isOnline) {
       await enqueue({
         entity: 'households',
         action: 'update',
@@ -425,7 +423,7 @@ const useStore = create((set, get) => ({
   // ── Household Expenses ─────────────────────────────────────────────────────
   fetchHouseholdExpenses: async (householdId) => {
     const { isOnline } = get();
-    if (!isOnline || get().isGuest) {
+    if (!isOnline) {
       const cached = await loadCache('householdExpenses');
       if (cached) {
         const merged = await mergeWithOfflineQueue(cached, get().householdExpenses, 'householdExpenses');
@@ -454,7 +452,7 @@ const useStore = create((set, get) => ({
     if (formData?.append) formData.append('clientId', clientId);
     const { fields, files } = payloadSnapshot(formData);
 
-    if (!isOnline || get().isGuest) {
+    if (!isOnline) {
       const optimistic = householdExpenseFromPayload(fields, files, clientId);
       set(s => ({ householdExpenses: [optimistic, ...s.householdExpenses] }));
       await saveCache('householdExpenses', get().householdExpenses);
@@ -484,7 +482,7 @@ const useStore = create((set, get) => ({
     const { isOnline } = get();
     const { fields, files } = payloadSnapshot(formData);
 
-    if (!isOnline || get().isGuest) {
+    if (!isOnline) {
       set(s => ({
         householdExpenses: s.householdExpenses.map(e => {
           if (e.id !== id) return e;
@@ -531,7 +529,7 @@ const useStore = create((set, get) => ({
   // ── Household Incomes ──────────────────────────────────────────────────────
   fetchHouseholdIncomes: async (householdId) => {
     const { isOnline } = get();
-    if (!isOnline || get().isGuest) {
+    if (!isOnline) {
       const cached = await loadCache('householdIncomes');
       if (cached) {
         const merged = await mergeWithOfflineQueue(cached, get().householdIncomes, 'householdIncomes');
@@ -559,7 +557,7 @@ const useStore = create((set, get) => ({
     const clientId = createClientId('hinc');
     const body = { ...payload, clientId };
 
-    if (!isOnline || get().isGuest) {
+    if (!isOnline) {
       const optimistic = {
         ...payload,
         id: clientId,
@@ -599,7 +597,7 @@ const useStore = create((set, get) => ({
     }));
     await saveCache('householdIncomes', get().householdIncomes);
 
-    if (!isOnline || get().isGuest) {
+    if (!isOnline) {
       await enqueue({
         entity: 'householdIncomes',
         action: 'update',
@@ -629,7 +627,7 @@ const useStore = create((set, get) => ({
   // ── Household Events ───────────────────────────────────────────────────────
   fetchHouseholdEvents: async (householdId) => {
     const { isOnline } = get();
-    if (!isOnline || get().isGuest) {
+    if (!isOnline) {
       const cached = await loadCache('householdEvents');
       if (cached) {
         const merged = await mergeWithOfflineQueue(cached, get().householdEvents, 'householdEvents');
@@ -657,7 +655,7 @@ const useStore = create((set, get) => ({
     const clientId = createClientId('hev');
     const body = { ...payload, clientId };
 
-    if (!isOnline || get().isGuest) {
+    if (!isOnline) {
       const optimistic = {
         ...payload,
         id: clientId,
@@ -696,7 +694,7 @@ const useStore = create((set, get) => ({
     }));
     await saveCache('householdEvents', get().householdEvents);
 
-    if (!isOnline || get().isGuest) {
+    if (!isOnline) {
       await enqueue({
         entity: 'householdEvents',
         action: 'update',
@@ -1755,7 +1753,7 @@ const useStore = create((set, get) => ({
   // ── Vehicle members ────────────────────────────────────────────────────────
   fetchVehicleMembers: async (vehicleId) => {
     const { isOnline } = get();
-    if (!isOnline || get().isGuest) {
+    if (!isOnline) {
       const cached = await loadCache('vehicleMembersById');
       if (cached?.[vehicleId]) {
         set(s => ({
@@ -1775,7 +1773,7 @@ const useStore = create((set, get) => ({
 
   addVehicleMember: async (vehicleId, payload) => {
     const { isOnline } = get();
-    if (!isOnline || get().isGuest) {
+    if (!isOnline) {
       await enqueue({
         entity: 'vehicleMembers',
         action: 'create',
@@ -1837,7 +1835,7 @@ const useStore = create((set, get) => ({
   // ── Vehicles ────────────────────────────────────────────────────────────────
   fetchVehicles: async () => {
     const { isOnline } = get();
-    if (!isOnline || get().isGuest) {
+    if (!isOnline) {
       const cached = await loadCache('vehicles');
       if (cached) set({ vehicles: cached });
       return;
@@ -1859,7 +1857,7 @@ const useStore = create((set, get) => ({
     const { photoUri, ...vehicleData } = v;
     const payload = ensureClientId(vehicleData, clientId);
 
-    if (!isOnline || get().isGuest) {
+    if (!isOnline) {
       let queuedPayload = payload;
       if (photoUri) {
         queuedPayload = new FormData();
@@ -1916,7 +1914,7 @@ const useStore = create((set, get) => ({
     const { photoUri, ...vehicleData } = patch;
     set(s => ({ vehicles: s.vehicles.map(v => v.id === id ? { ...v, ...vehicleData, ...(photoUri ? { photo: photoUri } : {}) } : v) }));
 
-    if (!isOnline || get().isGuest) {
+    if (!isOnline) {
       await saveCache('vehicles', get().vehicles);
       let queuedPayload = vehicleData;
       if (photoUri) {
@@ -1997,7 +1995,7 @@ const useStore = create((set, get) => ({
     const { isOnline } = get();
     const cacheKey = vehicleId ? `documents_${vehicleId}` : 'documents';
 
-    if (!isOnline || get().isGuest) {
+    if (!isOnline) {
       const cached = await loadCache(cacheKey);
       if (cached) {
         set({ documents: cached });
@@ -2024,7 +2022,7 @@ const useStore = create((set, get) => ({
     formData.append('clientId', clientId);
     const { fields, files } = payloadSnapshot(formData);
 
-    if (!isOnline || get().isGuest) {
+    if (!isOnline) {
       const optimistic = documentFromPayload(fields, files, clientId);
       set(s => ({ documents: [optimistic, ...s.documents] }));
       await saveCache('documents', get().documents);
@@ -2052,7 +2050,7 @@ const useStore = create((set, get) => ({
     const { isOnline } = get();
     set(s => ({ documents: s.documents.map(d => d.id === id ? { ...d, isSigned: true, signatureData } : d) }));
 
-    if (!isOnline || get().isGuest) {
+    if (!isOnline) {
       await saveCache('documents', get().documents);
       await enqueue({
         entity: 'documents',
@@ -2140,7 +2138,7 @@ const useStore = create((set, get) => ({
     const { isOnline } = get();
     const cacheKey = vehicleId ? `invoices_${vehicleId}` : 'invoices';
 
-    if (!isOnline || get().isGuest) {
+    if (!isOnline) {
       const cached = await loadCache(cacheKey);
       if (cached) {
         set({ invoices: cached });
@@ -2167,7 +2165,7 @@ const useStore = create((set, get) => ({
     formData.append('clientId', clientId);
     const { fields, files } = payloadSnapshot(formData);
 
-    if (!isOnline || get().isGuest) {
+    if (!isOnline) {
       const optimistic = invoiceFromPayload(fields, files, clientId);
       set(s => ({ invoices: [optimistic, ...s.invoices] }));
       await saveCache('invoices', get().invoices);
@@ -2195,7 +2193,7 @@ const useStore = create((set, get) => ({
     const { isOnline } = get();
     const { fields, files } = payloadSnapshot(formData);
 
-    if (!isOnline || get().isGuest) {
+    if (!isOnline) {
       set(s => ({
         invoices: s.invoices.map(i => {
           if (i.id !== id) return i;
@@ -2235,7 +2233,7 @@ const useStore = create((set, get) => ({
     const { isOnline } = get();
     const { files } = payloadSnapshot(formData);
 
-    if (!isOnline || get().isGuest) {
+    if (!isOnline) {
       const optimistic = optimisticAttachments(files);
       set(s => ({
         invoices: s.invoices.map(i =>
@@ -2338,7 +2336,7 @@ const useStore = create((set, get) => ({
   fetchReminders: async () => {
     const { isOnline } = get();
 
-    if (!isOnline || get().isGuest) {
+    if (!isOnline) {
       const cached = await loadCache('reminders');
       if (cached) set({ reminders: cached });
       return;
@@ -2359,7 +2357,7 @@ const useStore = create((set, get) => ({
     const clientId = createClientId('reminder');
     const payload = ensureClientId(r, clientId);
 
-    if (!isOnline || get().isGuest) {
+    if (!isOnline) {
       const optimistic = { ...r, id: clientId, clientId, isDone: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), _offline: true };
       set(s => ({ reminders: [optimistic, ...s.reminders] }));
       await saveCache('reminders', get().reminders);
@@ -2388,7 +2386,7 @@ const useStore = create((set, get) => ({
     set(s => ({ reminders: s.reminders.map(r => r.id === id ? { ...r, ...patch } : r) }));
     await saveCache('reminders', get().reminders);
 
-    if (!isOnline || get().isGuest) {
+    if (!isOnline) {
       await enqueue({
         entity: 'reminders',
         action: 'update',
@@ -2421,7 +2419,7 @@ const useStore = create((set, get) => ({
     const { isOnline } = get();
     const cacheKey = vehicleId ? `fuel_${vehicleId}` : 'fuel';
 
-    if (!isOnline || get().isGuest) {
+    if (!isOnline) {
       const cached = await loadCache(cacheKey);
       if (cached) {
         set({ fuelLogs: cached });
@@ -2449,7 +2447,7 @@ const useStore = create((set, get) => ({
     const queuedPayload = ensureClientId(payload, clientId);
     const { fields, files } = payloadSnapshot(queuedPayload);
 
-    if (!isOnline || get().isGuest) {
+    if (!isOnline) {
       const optimistic = isFormData
         ? fuelFromPayload(fields, files, clientId)
         : { ...queuedPayload, id: clientId, clientId, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), _offline: true };
@@ -2481,7 +2479,7 @@ const useStore = create((set, get) => ({
     const isFormData = payload && typeof payload.append === 'function';
     const { fields, files } = payloadSnapshot(payload);
 
-    if (!isOnline || get().isGuest) {
+    if (!isOnline) {
       set(s => ({
         fuelLogs: s.fuelLogs.map(f => {
           if (f.id !== id) return f;
@@ -2589,7 +2587,7 @@ const useStore = create((set, get) => ({
     const { isOnline } = get();
     const { files } = payloadSnapshot(formData);
 
-    if (!isOnline || get().isGuest) {
+    if (!isOnline) {
       const optimistic = optimisticAttachments(files);
       set(s => ({
         fuelLogs: s.fuelLogs.map(f =>
@@ -2637,7 +2635,7 @@ const useStore = create((set, get) => ({
   fetchNotifications: async () => {
     const { isOnline } = get();
 
-    if (!isOnline || get().isGuest) {
+    if (!isOnline) {
       const cached = await loadCache('notifications');
       if (cached) set({ notifications: cached });
       return;
@@ -2670,7 +2668,7 @@ const useStore = create((set, get) => ({
   fetchServiceRecords: async (vehicleId) => {
     const { isOnline } = get();
     const cacheKey = vehicleId ? `serviceRecords_${vehicleId}` : 'serviceRecords';
-    if (!isOnline || get().isGuest) {
+    if (!isOnline) {
       const cached = await loadCache(cacheKey);
       if (cached) set({ serviceRecords: cached });
       return cached || get().serviceRecords;
@@ -2792,7 +2790,7 @@ const useStore = create((set, get) => ({
   fetchHouseholdBills: async (householdId) => {
     const { isOnline } = get();
     const cacheKey = householdId ? `householdBills_${householdId}` : 'householdBills';
-    if (!isOnline || get().isGuest) {
+    if (!isOnline) {
       const cached = await loadCache(cacheKey);
       if (cached) set({ householdBills: cached });
       return cached || get().householdBills;

@@ -49,6 +49,7 @@ export default function AddHouseholdExpenseScreen({ navigation, route }) {
   const loadCustomCategories = useStore(s => s.loadCustomCategories);
   const budgetCategories = useStore(s => s.budgetCategories);
   const fetchBudgetCategories = useStore(s => s.fetchBudgetCategories);
+  const fetchHouseholdIncomes = useStore(s => s.fetchHouseholdIncomes);
   const { isTablet, hPad, maxContentWidth } = useResponsive();
 
   useEffect(() => { loadCustomCategories(); }, []);
@@ -60,6 +61,11 @@ export default function AddHouseholdExpenseScreen({ navigation, route }) {
   useEffect(() => {
     if (initialHouseholdIdLocal) fetchBudgetCategories(initialHouseholdIdLocal);
   }, [initialHouseholdIdLocal, fetchBudgetCategories]);
+  useEffect(() => {
+    // Refresh incomes once when the screen opens so the "Din ce venit?" picker
+    // can show entries that were added on another device.
+    if (initialHouseholdIdLocal) fetchHouseholdIncomes(initialHouseholdIdLocal).catch(() => {});
+  }, [initialHouseholdIdLocal, fetchHouseholdIncomes]);
 
   // Categories displayed in the picker. Budget categories defined at household
   // level come first (shared across all members). Built-in defaults follow as
@@ -100,9 +106,21 @@ export default function AddHouseholdExpenseScreen({ navigation, route }) {
   const [notes, setNotes] = useState(existing?.notes || '');
   const [customFields, setCustomFields] = useState(existing?.customFields || {});
   const [splitMode, setSplitMode] = useState(existing?.splitMode || 'single');
+  const [paymentMethod, setPaymentMethod] = useState(existing?.paymentMethod || 'card');
+  const [fromIncomeId, setFromIncomeId] = useState(existing?.fromIncomeId || null);
   const [attachments, setAttachments] = useState([]);
   const [existingAttachments, setExistingAttachments] = useState(existing?.attachments || []);
   const [loading, setLoading] = useState(false);
+
+  // Veniturile aceleiași locuințe — folosite în picker-ul "Din ce venit?".
+  // Sortăm desc după dată ca să apară primele cele mai recente.
+  const householdIncomes = useStore(s => s.householdIncomes);
+  const incomesForHousehold = useMemo(
+    () => (householdIncomes || [])
+      .filter(i => i.householdId === householdId)
+      .sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))),
+    [householdIncomes, householdId]
+  );
 
   const selectedCat = CATEGORIES.find(c => c.key === category) || CATEGORIES[0];
   const selectedHousehold = households.find(h => h.id === householdId);
@@ -147,6 +165,8 @@ export default function AddHouseholdExpenseScreen({ navigation, route }) {
       if (notes.trim()) fd.append('notes', notes.trim());
       if (Object.keys(customFields).length > 0) fd.append('customFields', JSON.stringify(customFields));
       fd.append('splitMode', splitMode);
+      fd.append('paymentMethod', paymentMethod);
+      if (fromIncomeId) fd.append('fromIncomeId', fromIncomeId);
       attachments.forEach((a, i) => {
         fd.append('attachments', { uri: a.uri, name: a.name || `file-${i}`, type: a.mimeType || 'application/octet-stream' });
       });
@@ -308,6 +328,54 @@ export default function AddHouseholdExpenseScreen({ navigation, route }) {
               </View>
             </View>
           </View>
+
+          {/* Plată: cash / card */}
+          <View style={styles.card}>
+            <Text style={styles.label}>Metodă de plată</Text>
+            <View style={styles.miniRow}>
+              <TouchableOpacity
+                onPress={() => setPaymentMethod('cash')}
+                style={[styles.mini, paymentMethod === 'cash' && styles.miniActive]}
+              >
+                <Text style={[styles.miniText, paymentMethod === 'cash' && styles.miniTextActive]}>💵 Cash</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setPaymentMethod('card')}
+                style={[styles.mini, paymentMethod === 'card' && styles.miniActive]}
+              >
+                <Text style={[styles.miniText, paymentMethod === 'card' && styles.miniTextActive]}>💳 Card</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Din ce venit a fost plătită cheltuiala (opțional) */}
+          {incomesForHousehold.length > 0 && (
+            <View style={styles.card}>
+              <Text style={styles.label}>Din ce venit? (opțional)</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, paddingVertical: 4 }}>
+                <TouchableOpacity
+                  onPress={() => setFromIncomeId(null)}
+                  style={[styles.chip, !fromIncomeId && styles.chipActive]}
+                >
+                  <Text style={[styles.chipText, !fromIncomeId && styles.chipTextActive]}>— Niciunul</Text>
+                </TouchableOpacity>
+                {incomesForHousehold.map(i => {
+                  const active = fromIncomeId === i.id;
+                  // Label scurt: titlu + sumă. Suficient ca să recunoști rapid venitul.
+                  const label = `${i.title} · ${Number(i.amount).toFixed(0)} ${i.currency || 'RON'}`;
+                  return (
+                    <TouchableOpacity
+                      key={i.id}
+                      onPress={() => setFromIncomeId(i.id)}
+                      style={[styles.chip, active && styles.chipActive]}
+                    >
+                      <Text style={[styles.chipText, active && styles.chipTextActive]}>💰 {label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          )}
 
           {/* Split */}
           {selectedHousehold?.memberCount > 0 && (

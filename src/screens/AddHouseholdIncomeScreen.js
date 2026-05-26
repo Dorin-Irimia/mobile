@@ -56,6 +56,7 @@ export default function AddHouseholdIncomeScreen({ navigation, route }) {
   const [recurring, setRecurring] = useState(existing?.recurring || 'none');
   const [notes, setNotes] = useState(existing?.notes || '');
   const [customFields, setCustomFields] = useState(existing?.customFields || {});
+  const [paymentMethod, setPaymentMethod] = useState(existing?.paymentMethod || 'card');
   const [loading, setLoading] = useState(false);
 
   const handleSave = async () => {
@@ -71,6 +72,7 @@ export default function AddHouseholdIncomeScreen({ navigation, route }) {
         recurring,
         notes: notes.trim() || null,
         customFields: Object.keys(customFields).length > 0 ? customFields : null,
+        paymentMethod,
       };
       if (isEdit) await updateHouseholdIncome(incomeId, payload);
       else await addHouseholdIncome(payload);
@@ -160,6 +162,24 @@ export default function AddHouseholdIncomeScreen({ navigation, route }) {
           <View style={styles.card}>
             <Text style={styles.label}>Sursă (opțional)</Text>
             <SuggestInput field="source" style={styles.input} value={source} onChangeText={setSource} placeholder='Ex: "Firma X SRL", "Chiriaș Apt2"' placeholderTextColor={T.ink4} />
+          </View>
+
+          <View style={styles.card}>
+            <Text style={styles.label}>Mod de încasare</Text>
+            <View style={styles.miniRow}>
+              <TouchableOpacity
+                onPress={() => setPaymentMethod('cash')}
+                style={[styles.mini, paymentMethod === 'cash' && styles.miniActive]}
+              >
+                <Text style={[styles.miniText, paymentMethod === 'cash' && styles.miniTextActive]}>💵 Cash</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setPaymentMethod('card')}
+                style={[styles.mini, paymentMethod === 'card' && styles.miniActive]}
+              >
+                <Text style={[styles.miniText, paymentMethod === 'card' && styles.miniTextActive]}>💳 Card</Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           <View style={styles.card}>

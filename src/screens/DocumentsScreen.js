@@ -38,6 +38,7 @@ import AttachmentViewer from '../components/AttachmentViewer';
 import DateField from '../components/DateField';
 import SourcePickerSheet from '../components/SourcePickerSheet';
 import { getApiUrl } from '../api/client';
+import { scheduleDocumentDeadlines, cancelDeadlineNotifications } from '../utils/deadlineNotifications';
 
 const EMOJI_OPTIONS = ['📁', '📂', '🗂', '🔧', '🛡️', '🔰', '🛣️', '🪪', '🧾', '📋', '📄', '🛠️', '⚙️', '🔑', '📜', '✍️'];
 
@@ -257,6 +258,9 @@ export default function DocumentsScreen({ navigation }) {
       });
 
       const saved = await addDocument(fd);
+      // Schedule 7/3/1-day expiry notifications. Uses the saved doc id so the
+      // notification key matches future edits/deletes.
+      try { await scheduleDocumentDeadlines(saved); } catch {}
       setShowAddDoc(false);
       resetDocForm();
 
@@ -306,6 +310,7 @@ export default function DocumentsScreen({ navigation }) {
           onPress: async () => {
             try {
               await deleteDocument(doc.id);
+              try { await cancelDeadlineNotifications(`document:${doc.id}:expiry`); } catch {}
               setViewerDoc(null);
             } catch (e) {
               Alert.alert(e?.offline ? 'Mod offline' : 'Eroare', e?.message || 'Nu s-a putut șterge.');

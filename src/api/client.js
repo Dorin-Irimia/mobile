@@ -18,6 +18,13 @@ NetInfo.fetch().then(state => { _hasNetwork = !!state.isConnected; }).catch(() =
 
 export function hasNetwork() { return _hasNetwork; }
 
+// Global gate to disable ALL HTTP requests. Used by guest mode to make
+// absolutely sure no API call ever leaves the device — otherwise the user
+// gets a "Token lipsă" 401 from the server because there's no auth token.
+let _apiDisabled = false;
+export function setApiDisabled(v) { _apiDisabled = !!v; }
+export function isApiDisabled() { return _apiDisabled; }
+
 export async function loadApiUrl() {
   try {
     const saved = await SecureStore.getItemAsync(API_URL_KEY);
@@ -40,6 +47,17 @@ const api = axios.create({ timeout: 4000 });
 
 api.interceptors.request.use(async (config) => {
   config.baseURL = `${_apiUrl}/api`;
+  // Guest mode: refuse outright. The store's offline paths handle everything
+  // locally; if a code path slips through and tries to call the API, we'd hit
+  // the backend with no token and get "Token lipsă" — the user's bug report.
+  if (_apiDisabled) {
+    return Promise.reject({
+      message: 'Guest mode — API disabled',
+      code: 'GUEST_MODE',
+      isOfflineShortCircuit: true,
+      config,
+    });
+  }
   // Short-circuit when the device has no network. This stops every request
   // from waiting the full timeout when we already know it'll fail.
   if (_hasNetwork === false) {
@@ -72,13 +90,13 @@ api.interceptors.response.use(
         original.headers.Authorization = `Bearer ${data.accessToken}`;
         return api(original);
       } catch (refreshErr) {
-        if (refreshErr.response) {
-          // Server explicitly rejected the refresh → truly logged out
-          await SecureStore.deleteItemAsync('accessToken');
-          await SecureStore.deleteItemAsync('refreshToken');
-          await SecureStore.deleteItemAsync('user');
-        }
-        // Network error → keep credentials so restoreAuth works when back online
+        // Persistent login: never wipe the user record on refresh failure.
+        // If the server rejected the refresh (token expired or revoked from
+        // another device), we still keep the cached `user` in SecureStore so
+        // restoreAuth() on next launch shows the app in offline mode, with all
+        // cached data visible. The user can re-enter their password via the
+        // Settings screen if they actively want a fresh online session.
+        // Network error → identical behavior; the queue/sync will retry later.
       }
     }
     return Promise.reject(error);

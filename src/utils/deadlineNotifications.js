@@ -96,6 +96,34 @@ export async function cancelDeadlineNotifications(key) {
   await cancelByKey(key);
 }
 
+// Schedule expiry notifications for a single document. Pass `null` or the doc
+// without `expiryDate` to simply cancel any previously scheduled notifs.
+export async function scheduleDocumentDeadlines(doc) {
+  if (!doc?.id) return;
+  const key = `document:${doc.id}:expiry`;
+  if (!doc.expiryDate) {
+    await cancelDeadlineNotifications(key);
+    return;
+  }
+  const label = doc.name || doc.type || 'Document';
+  await scheduleDeadlineNotifications({
+    key,
+    title: '📄 Document expiră curând',
+    body: label,
+    date: doc.expiryDate,
+    time: '09:00',
+    data: { relatedType: 'Document', relatedId: doc.id },
+  });
+}
+
+// Bulk: re-arm expiry notifications for every document in the list.
+export async function scheduleAllDocumentDeadlines(documents) {
+  if (!Array.isArray(documents)) return;
+  for (const d of documents) {
+    try { await scheduleDocumentDeadlines(d); } catch {}
+  }
+}
+
 // Bulk: re-arm everything for a vehicle (ITP / RCA / CASCO / Rovinietă).
 export async function scheduleVehicleDeadlines(vehicle) {
   if (!vehicle?.id) return;

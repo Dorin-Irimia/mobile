@@ -5,7 +5,7 @@ import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import api from '../api/client';
 import useStore from '../store';
-import { scheduleVehicleDeadlines } from '../utils/deadlineNotifications';
+import { scheduleVehicleDeadlines, scheduleAllDocumentDeadlines } from '../utils/deadlineNotifications';
 
 // Handler pentru ce se întâmplă când o notificare ajunge:
 // - Banner pe ecran (chiar dacă app e deschis)
@@ -44,6 +44,7 @@ export function usePushNotifications(navigationRef) {
       ensureLocalPermission();
     }
     rescheduleAllVehicleDeadlines();
+    rescheduleAllDocumentDeadlines();
 
     // Refresh notifications list when one arrives in foreground
     notifListener.current = Notifications.addNotificationReceivedListener(() => {
@@ -185,6 +186,18 @@ async function rescheduleAllVehicleDeadlines() {
         await scheduleVehicleDeadlines(v);
       }
     }
+  } catch {
+    // Ignore — best effort.
+  }
+}
+
+// Re-arm expiry notifications for all stored documents on app start so a
+// phone reboot or app reinstall doesn't lose them. Keyed by doc id so prior
+// schedules are replaced cleanly when the expiry changes.
+async function rescheduleAllDocumentDeadlines() {
+  try {
+    const documents = useStore.getState().documents || [];
+    await scheduleAllDocumentDeadlines(documents.filter(d => d?.expiryDate));
   } catch {
     // Ignore — best effort.
   }

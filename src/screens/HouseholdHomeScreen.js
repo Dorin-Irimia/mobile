@@ -167,13 +167,61 @@ export default function HouseholdHomeScreen({ navigation }) {
     return householdEvents.filter(e => e.householdId === selectedHousehold.id && !e.isDone);
   }, [householdEvents, selectedHousehold]);
 
-  const monthExpenses = filteredExpenses
-    .filter(e => isInBillingMonth(e.date, monthAnchor, monthStartDay))
-    .reduce((s, e) => s + Number(e.amount || 0), 0);
+  const monthExpensesList = useMemo(
+    () => filteredExpenses.filter(e => isInBillingMonth(e.date, monthAnchor, monthStartDay)),
+    [filteredExpenses, monthAnchor, monthStartDay]
+  );
+  const monthIncomesList = useMemo(
+    () => filteredIncomes.filter(i => isInBillingMonth(i.date, monthAnchor, monthStartDay)),
+    [filteredIncomes, monthAnchor, monthStartDay]
+  );
 
-  const monthIncomes = filteredIncomes
-    .filter(i => isInBillingMonth(i.date, monthAnchor, monthStartDay))
-    .reduce((s, i) => s + Number(i.amount || 0), 0);
+  const monthExpenses = monthExpensesList.reduce((s, e) => s + Number(e.amount || 0), 0);
+  const monthIncomes = monthIncomesList.reduce((s, i) => s + Number(i.amount || 0), 0);
+
+  // Cash vs card pe luna curentă. Veniturile fără paymentMethod sunt ignorate
+  // în calculul soldului (nu știm unde au intrat) — la fel pentru cheltuieli.
+  // Soldul cash = încasări cash − plăți cash; similar pentru card.
+  const moneyBreakdown = useMemo(() => {
+    let cashIn = 0, cardIn = 0, cashOut = 0, cardOut = 0;
+    for (const i of monthIncomesList) {
+      const amt = Number(i.amount || 0);
+      if (i.paymentMethod === 'cash') cashIn += amt;
+      else if (i.paymentMethod === 'card') cardIn += amt;
+    }
+    for (const e of monthExpensesList) {
+      const amt = Number(e.amount || 0);
+      if (e.paymentMethod === 'cash') cashOut += amt;
+      else if (e.paymentMethod === 'card') cardOut += amt;
+    }
+    return {
+      cashIn, cardIn, cashOut, cardOut,
+      cashBalance: cashIn - cashOut,
+      cardBalance: cardIn - cardOut,
+    };
+  }, [monthExpensesList, monthIncomesList]);
+
+  // Cât a mai rămas din fiecare venit (sumă − cheltuielile asociate explicit).
+  // Ignorăm veniturile la care nu are nicio cheltuială atașată ca să nu umflăm
+  // lista. Suma poate să iasă negativă dacă cineva alocă peste — păstrăm semnul.
+  const incomeRemaining = useMemo(() => {
+    const expByIncome = new Map();
+    for (const e of monthExpensesList) {
+      if (!e.fromIncomeId) continue;
+      expByIncome.set(e.fromIncomeId, (expByIncome.get(e.fromIncomeId) || 0) + Number(e.amount || 0));
+    }
+    return monthIncomesList
+      .map(i => ({
+        id: i.id,
+        title: i.title,
+        currency: i.currency || 'RON',
+        amount: Number(i.amount || 0),
+        spent: expByIncome.get(i.id) || 0,
+        remaining: Number(i.amount || 0) - (expByIncome.get(i.id) || 0),
+      }))
+      .filter(row => row.spent > 0 || row.amount > 0)
+      .sort((a, b) => b.amount - a.amount);
+  }, [monthExpensesList, monthIncomesList]);
 
   const balance = monthIncomes - monthExpenses;
   const budgetUsed = selectedHousehold?.monthlyBudget
@@ -368,6 +416,60 @@ export default function HouseholdHomeScreen({ navigation }) {
             </View>
           )}
         </View>
+
+        {/* Cash vs card breakdown */}
+        <View style={styles.cashCardWrap}>
+          <View style={[styles.moneyTile, { borderColor: '#10B981' }]}>
+            <Text style={styles.moneyTileLabel}>💵 Cash</Text>
+            <Text style={[styles.moneyTileValue, { color: moneyBreakdown.cashBalance >= 0 ? '#10B981' : T.danger }]}>
+              {moneyBreakdown.cashBalance >= 0 ? '+' : ''}{formatCurrency(moneyBreakdown.cashBalance, 'RON')}
+            </Text>
+            <Text style={styles.moneyTileSub}>
+              +{formatCurrency(moneyBreakdown.cashIn, 'RON')} · −{formatCurrency(moneyBreakdown.cashOut, 'RON')}
+            </Text>
+          </View>
+          <View style={[styles.moneyTile, { borderColor: T.brand }]}>
+            <Text style={styles.moneyTileLabel}>💳 Card</Text>
+            <Text style={[styles.moneyTileValue, { color: moneyBreakdown.cardBalance >= 0 ? T.brand : T.danger }]}>
+              {moneyBreakdown.cardBalance >= 0 ? '+' : ''}{formatCurrency(moneyBreakdown.cardBalance, 'RON')}
+            </Text>
+            <Text style={styles.moneyTileSub}>
+              +{formatCurrency(moneyBreakdown.cardIn, 'RON')} · −{formatCurrency(moneyBreakdown.cardOut, 'RON')}
+            </Text>
+          </View>
+        </View>
+
+        {/* Per-income remaining */}
+        {incomeRemaining.length > 0 && (
+          <View style={styles.incomesCard}>
+            <Text style={styles.incomesTitle}>💰 Rămas din venituri · {periodLabel}</Text>
+            {incomeRemaining.map(row => {
+              const pctSpent = row.amount > 0 ? Math.min(100, (row.spent / row.amount) * 100) : 0;
+              const overBudget = row.remaining < 0;
+              return (
+                <View key={row.id} style={styles.incomeRow}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <Text style={styles.incomeRowTitle} numberOfLines={1}>{row.title}</Text>
+                    <Text style={[styles.incomeRowRemaining, overBudget && { color: T.danger }]}>
+                      {overBudget ? '' : ''}{formatCurrency(row.remaining, row.currency)}
+                    </Text>
+                  </View>
+                  <View style={styles.incomeBarBg}>
+                    <View
+                      style={[
+                        styles.incomeBarFill,
+                        { width: `${pctSpent}%`, backgroundColor: overBudget ? T.danger : '#10B981' },
+                      ]}
+                    />
+                  </View>
+                  <Text style={styles.incomeRowSub}>
+                    {formatCurrency(row.spent, row.currency)} cheltuiți din {formatCurrency(row.amount, row.currency)}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        )}
 
         {/* Quick actions */}
         <View style={styles.actionsRow}>
@@ -664,6 +766,33 @@ const styles = StyleSheet.create({
   budgetBarBg: { height: 6, backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: 3, overflow: 'hidden' },
   budgetBarFill: { height: '100%', borderRadius: 3 },
   budgetText: { color: 'rgba(255,255,255,0.85)', fontSize: 11, marginTop: 4 },
+
+  cashCardWrap: { flexDirection: 'row', gap: SPACING.sm },
+  moneyTile: {
+    flex: 1,
+    backgroundColor: T.card,
+    borderRadius: RADIUS.lg,
+    padding: SPACING.md,
+    borderWidth: 1.5,
+    ...SHADOW.sm,
+  },
+  moneyTileLabel: { fontSize: 12, fontWeight: FONTS.bold, color: T.ink2, letterSpacing: 0.4 },
+  moneyTileValue: { fontSize: 20, fontWeight: FONTS.bold, marginTop: 4 },
+  moneyTileSub: { fontSize: 11, color: T.ink3, marginTop: 2 },
+
+  incomesCard: {
+    backgroundColor: T.card,
+    borderRadius: RADIUS.lg,
+    padding: SPACING.lg,
+    ...SHADOW.sm,
+  },
+  incomesTitle: { fontSize: 14, fontWeight: FONTS.bold, color: T.ink, marginBottom: SPACING.sm },
+  incomeRow: { marginBottom: SPACING.md },
+  incomeRowTitle: { fontSize: 13, fontWeight: FONTS.semibold, color: T.ink2, flex: 1, marginRight: SPACING.sm },
+  incomeRowRemaining: { fontSize: 13, fontWeight: FONTS.bold, color: '#10B981' },
+  incomeBarBg: { height: 6, backgroundColor: T.bgSoft, borderRadius: 3, overflow: 'hidden' },
+  incomeBarFill: { height: '100%', borderRadius: 3 },
+  incomeRowSub: { fontSize: 11, color: T.ink3, marginTop: 4 },
 
   actionsRow: { flexDirection: 'row', gap: SPACING.sm },
   actionTile: {
